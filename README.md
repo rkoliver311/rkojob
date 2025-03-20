@@ -1,2 +1,2 @@
 # rkojob
-Python modules for executing structured jobs
+Python modules for executing structured jobs.
