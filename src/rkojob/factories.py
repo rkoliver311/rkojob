@@ -6,7 +6,7 @@ class JobContextFactory:
     def create(cls, *args, **kwargs) -> JobContext:
         from rkojob.context import JobContextImpl
 
-        return JobContextImpl()
+        return JobContextImpl(values=kwargs.get("values"))
 
 
 class JobRunnerFactory:

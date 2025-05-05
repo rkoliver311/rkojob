@@ -2,7 +2,7 @@ from enum import Enum, auto
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob import JobException
+from rkojob import JobException, Values
 from rkojob.context import JobContextImpl
 
 
@@ -111,3 +111,7 @@ class TestJobContextImpl(TestCase):
         self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_exceptions())
         self.assertEqual([baz_error, boz_error, buz_error], sut.get_exceptions(mock_scope))
         self.assertEqual([buz_error], sut.get_exceptions(mock_scope_2))
+
+    def test_values(self) -> None:
+        sut = JobContextImpl()
+        self.assertIsInstance(sut.values, Values)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import (
+    Any,
     Generator,
     Tuple,
 )
@@ -10,6 +11,7 @@ from rkojob import (
     JobException,
     JobScope,
 )
+from rkojob.values import Values
 
 
 class JobContextState:
@@ -18,11 +20,14 @@ class JobContextState:
 
 
 class JobContextImpl:
-    def __init__(self) -> None:
+    def __init__(self, *, values: dict[str, Any] | None = None) -> None:
         # State that pushes and pops with the scope.
         self._state_stack: list[JobContextState] = []
         # List of recorded exceptions
         self._exceptions: dict[tuple[JobScope, ...], list[Exception]] = {}
+        if values is None:
+            values = {}
+        self._values: Values = Values(**values)
 
     @contextmanager
     def in_scope(self, scope: JobScope) -> Generator[JobScope, None, None]:
@@ -98,3 +103,7 @@ class JobContextImpl:
             if scope is None or scope in scopes:
                 exceptions.extend(self._exceptions[scopes])
         return exceptions
+
+    @property
+    def values(self) -> Values:
+        return self._values

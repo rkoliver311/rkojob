@@ -9,6 +9,8 @@ from typing import (
     runtime_checkable,
 )
 
+from rkojob.values import Values
+
 
 class JobException(Exception):
     """Base class for job‑specific errors."""
@@ -53,6 +55,8 @@ class JobContext(Protocol):
     """
 
     def get_exceptions(self, scope: JobScope | None = None) -> list[Exception]: ...
+    @property
+    def values(self) -> Values: ...
 
     """
     Return exceptions recorded for *scope* or for *all* scopes if omitted.
