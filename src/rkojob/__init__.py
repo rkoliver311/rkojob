@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from contextlib import contextmanager
+from enum import Enum, auto
 from typing import (
+    Any,
     Final,
     Generator,
     Protocol,
@@ -13,6 +16,7 @@ from typing import (
     runtime_checkable,
 )
 
+from rkojob.delegates import delegate
 from rkojob.values import (
     ComputedValue,
     ValueConsumer,
@@ -27,6 +31,200 @@ class JobException(Exception):
     """Base class for job‑specific errors."""
 
     pass
+
+
+class JobStatus(Protocol):
+    def start_scope(self, scope: JobScope) -> None: ...
+
+    def finish_scope(self, scope: JobScope | None = None) -> None: ...
+
+    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None: ...
+
+    def start_section(self, name: str) -> None: ...
+
+    def finish_section(self, name: str | None = None) -> None: ...
+
+    def start_item(self, description: str) -> None: ...
+
+    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None: ...
+
+    def info(self, info: str) -> None: ...
+
+    def detail(self, detail: str) -> None: ...
+
+    def error(self, error: Exception | str) -> None: ...
+
+    def warning(self, warning: Exception | str) -> None: ...
+
+    def output(self, output: str | Iterable[str], label: str | None = None) -> None: ...
+
+
+class JobBaseStatus(JobStatus):
+    def start_scope(self, scope: JobScope) -> None:  # pragma: no cover
+        pass
+
+    def finish_scope(self, scope: JobScope | None = None) -> None:  # pragma: no cover
+        pass
+
+    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None:  # pragma: no cover
+        pass
+
+    def start_section(self, name: str) -> None:  # pragma: no cover
+        pass
+
+    def finish_section(self, name: str | None = None) -> None:  # pragma: no cover
+        pass
+
+    def start_item(self, description: str) -> None:  # pragma: no cover
+        pass
+
+    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:  # pragma: no cover
+        pass
+
+    def info(self, info: str) -> None:  # pragma: no cover
+        pass
+
+    def detail(self, detail: str) -> None:  # pragma: no cover
+        pass
+
+    def error(self, error: Exception | str) -> None:  # pragma: no cover
+        pass
+
+    def warning(self, warning: Exception | str) -> None:  # pragma: no cover
+        pass
+
+    def output(self, output: str | Iterable[str], label: str | None = None) -> None:  # pragma: no cover
+        pass
+
+    @contextmanager
+    def scope(self, scope: JobScope) -> Generator[None, Any, None]:
+        try:
+            self.start_scope(scope)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_scope(scope)
+
+    @contextmanager
+    def section(self, name: str) -> Generator[None, Any, None]:
+        try:
+            self.start_section(name)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_section(name)
+
+    @contextmanager
+    def item(self, event: str) -> Generator[None, Any, None]:
+        try:
+            self.start_item(event)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_item()
+
+
+class JobStatusCollector:
+    def __init__(self) -> None:
+        pass
+
+    def add_listener(self, status_listener: JobStatus) -> None:
+        self.start_scope.add_callback(status_listener.start_scope)
+        self.finish_scope.add_callback(status_listener.finish_scope)
+        self.skip_scope.add_callback(status_listener.skip_scope)
+        self.start_section.add_callback(status_listener.start_section)
+        self.finish_section.add_callback(status_listener.finish_section)
+        self.start_item.add_callback(status_listener.start_item)
+        self.finish_item.add_callback(status_listener.finish_item)
+        self.info.add_callback(status_listener.info)
+        self.detail.add_callback(status_listener.detail)
+        self.error.add_callback(status_listener.error)
+        self.warning.add_callback(status_listener.warning)
+        self.output.add_callback(status_listener.output)
+
+    @contextmanager
+    def scope(self, scope: JobScope) -> Generator[None, Any, None]:
+        try:
+            self.start_scope(scope)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_scope(scope)
+
+    @delegate
+    def start_scope(self, scope: JobScope): ...
+
+    @delegate
+    def finish_scope(self, scope: JobScope | None = None): ...
+
+    @delegate
+    def skip_scope(self, scope: JobScope | None = None): ...
+
+    @contextmanager
+    def section(self, name: str) -> Generator[None, Any, None]:
+        try:
+            self.start_section(name)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_section(name)
+
+    @delegate
+    def start_section(self, name: str) -> None: ...
+
+    @delegate
+    def finish_section(self, name: str | None = None) -> None: ...
+
+    @contextmanager
+    def item(self, event: str) -> Generator[None, Any, None]:
+        try:
+            self.start_item(event)
+            yield
+        except Exception as e:
+            self.error(e)
+            raise
+        finally:
+            self.finish_item()
+
+    @delegate
+    def start_item(self, event: str) -> None: ...
+
+    @delegate
+    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None: ...
+
+    @delegate
+    def info(self, info: str) -> None: ...
+
+    @delegate
+    def detail(self, detail: str) -> None: ...
+
+    @delegate
+    def error(self, error: Exception | str) -> None: ...
+
+    @delegate
+    def warning(self, warning: Exception | str) -> None: ...
+
+    @delegate
+    def output(self, output: str | Iterable[str], label: str | None = None) -> None: ...
+
+
+class JobScopeStatus(Enum):
+    PASSED = auto()
+    FAILED = auto()
+    RUNNING = auto()
+    FAILING = auto()
+    SKIPPED = auto()
+    UNKNOWN = auto()
 
 
 class JobContext(Protocol):
@@ -68,6 +266,9 @@ class JobContext(Protocol):
     def get_exceptions(self, scope: JobScope | None = None) -> list[Exception]: ...
     @property
     def values(self) -> Values: ...
+    @property
+    def status(self) -> JobStatusCollector: ...
+    def get_scope_status(self, scope: JobScope) -> JobScopeStatus: ...
 
     """
     Return exceptions recorded for *scope* or for *all* scopes if omitted.

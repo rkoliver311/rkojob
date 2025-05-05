@@ -9,6 +9,7 @@ from rkojob import (
     JobException,
     JobGroupScope,
     JobScope,
+    JobScopeStatus,
     JobTeardownScope,
     job_fail,
     job_never,
@@ -46,9 +47,10 @@ class JobRunnerImpl:
         skip_reason: str
         should_skip, skip_reason = self._should_skip(context, scope)
         if should_skip:
+            context.status.skip_scope(scope, reason=skip_reason or None)
             return
 
-        with context.in_scope(scope):
+        with context.in_scope(scope), context.status.scope(scope):
             try:
                 if group:
                     self._run_group(context, group)
@@ -72,7 +74,7 @@ class JobRunnerImpl:
                 action.action(context)
             except Exception as e:
                 # Add error to current scope's list of errors
-                context.exception(e)
+                context.status.error(e)
 
     def _run_group_teardown(
         self, context: JobContext, group: JobGroupScope, *, scope_to_teardown: JobScope | None = None
@@ -90,16 +92,35 @@ class JobRunnerImpl:
             if child_as_group:
                 self._run_group_teardown(context, child_as_group, scope_to_teardown=scope_to_teardown)
             elif child_as_teardown:
-                self._run_teardown(context, child_as_teardown)
+                self._run_teardown(context, child_as_teardown, scope_to_teardown=scope_to_teardown)
 
-    def _run_teardown(self, context: JobContext, teardown: JobTeardownScope) -> None:
+    def _run_teardown(
+        self, context: JobContext, teardown: JobTeardownScope, *, scope_to_teardown: JobScope | None = None
+    ) -> None:
+        if scope_to_teardown is None:
+            scope_to_teardown = teardown
+
+        # Do not run teardown if the scope was skipped or never run
+        scope_status: JobScopeStatus = context.get_scope_status(teardown)
+        if scope_status in (JobScopeStatus.UNKNOWN, JobScopeStatus.SKIPPED):
+            context.status.detail(
+                f"Skipping Teardown {scope_to_teardown.type} {scope_to_teardown.name} ({teardown.type} {teardown.name})"
+            )
+            return
+
         # Teardown a scope.
         if teardown.teardown:
             try:
+                section: str = f"Teardown {scope_to_teardown.type} {scope_to_teardown.name}"
+                if teardown is not scope_to_teardown:
+                    section += f" ({teardown.type} {teardown.name})"
+                context.status.start_section(section)
                 teardown.teardown(context)
-            except Exception:
-                # do not raise
-                pass
+            except Exception as e:
+                # Log but do not raise
+                context.status.warning(e)
+            finally:
+                context.status.finish_section()
 
     def _should_skip(self, context: JobContext, scope: JobScope) -> tuple[bool, str]:
         if isinstance(scope, JobConditionalScope):

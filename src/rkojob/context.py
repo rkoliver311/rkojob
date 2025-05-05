@@ -8,8 +8,11 @@ from typing import (
 )
 
 from rkojob import (
+    JobBaseStatus,
     JobException,
     JobScope,
+    JobScopeStatus,
+    JobStatusCollector,
     Values,
 )
 
@@ -19,15 +22,67 @@ class JobContextState:
         self.scope: JobScope = scope
 
 
+class JobScopeStatuses(JobBaseStatus):
+    """
+    A `JobStatus` implementation that tracks the status of scopes
+    including errors that occurred within each scope.
+    """
+
+    def __init__(self) -> None:
+        self._statuses: dict[JobScope, JobScopeStatus] = {}
+        self._scope_stack: list[JobScope] = []
+        self._errors: dict[tuple[JobScope, ...], list[str | Exception]] = {}
+
+    def get_status(self, scope: JobScope) -> JobScopeStatus:
+        return self._statuses.get(scope, JobScopeStatus.UNKNOWN)
+
+    def get_errors(self, scope: JobScope | None = None) -> list[str | Exception]:
+        errors: list[str | Exception] = []
+        for scopes in self._errors:
+            if scope is None or scope in scopes:
+                errors.extend(self._errors[scopes])
+        return errors
+
+    def start_scope(self, scope: JobScope) -> None:
+        if self.get_status(scope) != JobScopeStatus.UNKNOWN:
+            raise JobException("Scope status already set.")
+        self._scope_stack.append(scope)
+        self._statuses[scope] = JobScopeStatus.RUNNING
+
+    def finish_scope(self, scope: JobScope | None = None) -> None:
+        if scope and scope is not self._scope_stack[-1]:
+            raise JobException("Scope does not match scope on stack.")
+        scope = self._scope_stack.pop()
+        self._statuses[scope] = JobScopeStatus.FAILED if self.get_errors(scope) else JobScopeStatus.PASSED
+
+    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:
+        if error:
+            self.error(error)
+
+    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None:
+        self._statuses[scope] = JobScopeStatus.SKIPPED
+
+    def error(self, error: Exception | str) -> None:
+        key: Tuple[JobScope, ...] = tuple([scope for scope in self._scope_stack])
+        if key not in self._errors:
+            self._errors[key] = []
+        self._errors[key].append(error)
+        if key:
+            # If we have a running scope mark it as failing
+            self._statuses[key[-1]] = JobScopeStatus.FAILING
+
+
 class JobContextImpl:
     def __init__(self, *, values: dict[str, Any] | None = None) -> None:
         # State that pushes and pops with the scope.
         self._state_stack: list[JobContextState] = []
-        # List of recorded exceptions
-        self._exceptions: dict[tuple[JobScope, ...], list[Exception]] = {}
+
         if values is None:
             values = {}
         self._values: Values = Values(**values)
+        self._status: JobStatusCollector = JobStatusCollector()
+        self._scope_statuses: JobScopeStatuses = JobScopeStatuses()
+        self._status.add_listener(self._scope_statuses)
 
     @contextmanager
     def in_scope(self, scope: JobScope) -> Generator[JobScope, None, None]:
@@ -66,6 +121,13 @@ class JobContextImpl:
         """
         return tuple(state.scope for state in self._state_stack)
 
+    @property
+    def status(self) -> JobStatusCollector:
+        return self._status
+
+    def get_scope_status(self, scope: JobScope) -> JobScopeStatus:
+        return self._scope_statuses.get_status(scope)
+
     def _get_state(self, scope: JobScope | None) -> JobContextState:
         # Get the state for the provided scope
         if not self._state_stack:
@@ -86,9 +148,7 @@ class JobContextImpl:
         """
         if not isinstance(error, Exception):
             error = JobException(error)
-        if self.scopes not in self._exceptions:
-            self._exceptions[self.scopes] = []
-        self._exceptions[self.scopes].append(error)
+        self.status.error(error)
         return error
 
     def get_exceptions(self, scope: JobScope | None = None) -> list[Exception]:
@@ -98,11 +158,10 @@ class JobContextImpl:
         :param scope: Scope to return exceptions for, or ``None`` to get all exceptions.
         :returns: List of recorded exceptions.
         """
-        exceptions: list[Exception] = []
-        for scopes in self._exceptions:
-            if scope is None or scope in scopes:
-                exceptions.extend(self._exceptions[scopes])
-        return exceptions
+        return [
+            Exception(error) if not isinstance(error, Exception) else error
+            for error in self._scope_statuses.get_errors(scope)
+        ]
 
     @property
     def values(self) -> Values:

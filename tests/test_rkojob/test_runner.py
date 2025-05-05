@@ -80,9 +80,6 @@ class TestJobRunnerImpl(TestCase):
         self.assertEqual(
             [
                 "Action: job->stage1->step1.1",
-                "Teardown stage2: step2.2",
-                "Teardown stage2: step2.1",
-                "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
@@ -288,7 +285,6 @@ class TestJobRunnerImpl(TestCase):
                 "Action: job->stage3->step3.2",
                 "Teardown job: step3.2",
                 "Teardown job: step3.1",
-                "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
             side_effects,
@@ -304,10 +300,6 @@ class TestJobRunnerImpl(TestCase):
         self.assertEqual(
             [
                 "Action: job->stage1->step1.2",
-                "Teardown stage2: step2.2",
-                "Teardown stage2: step2.1",
-                "Teardown job: step3.2",
-                "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
@@ -332,7 +324,6 @@ class TestJobRunnerImpl(TestCase):
                 "Action: job->stage3->step3.2",
                 "Teardown job: step3.2",
                 "Teardown job: step3.1",
-                "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
             side_effects,
@@ -350,7 +341,6 @@ class TestJobRunnerImpl(TestCase):
                 "Action: job->stage1->step1.1",
                 "Action: job->stage1->step1.2",
                 "Action: job->stage2->step2.1",
-                "Teardown stage2: step2.2",
                 "Teardown stage2: step2.1",
                 "Action: job->stage3->step3.1",
                 "Action: job->stage3->step3.2",
@@ -373,10 +363,6 @@ class TestJobRunnerImpl(TestCase):
         self.assertEqual(
             [
                 "Action: job->stage1->step1.1",
-                "Teardown stage2: step2.2",
-                "Teardown stage2: step2.1",
-                "Teardown job: step3.2",
-                "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
@@ -422,10 +408,7 @@ class TestJobRunnerImpl(TestCase):
             [
                 "Action: job->stage1->step1.1",
                 "Action: job->stage2->step2.1",
-                "Teardown stage2: step2.2",
                 "Teardown stage2: step2.1",
-                "Teardown job: step3.2",
-                "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],

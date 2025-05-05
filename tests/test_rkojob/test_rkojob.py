@@ -2,8 +2,10 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import (
+    JobBaseStatus,
     JobContext,
     JobException,
+    JobStatusCollector,
     ValueKey,
     assign_value,
     resolve_value,
@@ -19,6 +21,208 @@ class TestJobException(TestCase):
             raise JobException("error")
         except JobException as e:
             self.assertEqual("error", str(e))
+
+
+class TestJobBaseStatus(TestCase):
+    def test_scope(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_scope = MagicMock()  # type: ignore[method-assign]
+        sut.finish_scope = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        mock_scope = MagicMock()
+        with sut.scope(mock_scope):
+            sut.start_scope.assert_called_with(mock_scope)
+        sut.finish_scope.assert_called_with(mock_scope)
+        sut.error.assert_not_called()
+
+    def test_scope_error(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_scope = MagicMock()  # type: ignore[method-assign]
+        sut.finish_scope = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        mock_scope = MagicMock()
+        exception = Exception("error")
+        with self.assertRaises(Exception):
+            with sut.scope(mock_scope):
+                sut.start_scope.assert_called_with(mock_scope)
+                raise exception
+        sut.error.assert_called_with(exception)
+        sut.finish_scope.assert_called_with(mock_scope)
+
+    def test_section(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_section = MagicMock()  # type: ignore[method-assign]
+        sut.finish_section = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        with sut.section("name"):
+            sut.start_section.assert_called_with("name")
+        sut.finish_section.assert_called_with("name")
+        sut.error.assert_not_called()
+
+    def test_section_error(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_section = MagicMock()  # type: ignore[method-assign]
+        sut.finish_section = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        exception = Exception("error")
+        with self.assertRaises(Exception):
+            with sut.section("name"):
+                sut.start_section.assert_called_with("name")
+                raise exception
+        sut.error.assert_called_with(exception)
+        sut.finish_section.assert_called_with("name")
+
+    def test_item(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_item = MagicMock()  # type: ignore[method-assign]
+        sut.finish_item = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        with sut.item("item"):
+            sut.start_item.assert_called_with("item")
+        sut.finish_item.assert_called_with()
+        sut.error.assert_not_called()
+
+    def test_item_error(self) -> None:
+        sut = JobBaseStatus()
+        sut.start_item = MagicMock()  # type: ignore[method-assign]
+        sut.finish_item = MagicMock()  # type: ignore[method-assign]
+        sut.error = MagicMock()  # type: ignore[method-assign]
+        exception = Exception("error")
+        with self.assertRaises(Exception):
+            with sut.item("item"):
+                sut.start_item.assert_called_with("item")
+                raise exception
+        sut.error.assert_called_with(exception)
+        sut.finish_item.assert_called_with()
+
+
+class TestJobStatusCollector(TestCase):
+    def setUp(self) -> None:
+        self.mock_arg = MagicMock()
+        self.mock_1 = MagicMock()
+        self.mock_2 = MagicMock()
+        self.sut = JobStatusCollector()
+        self.sut.add_listener(self.mock_1)
+        self.sut.add_listener(self.mock_2)
+
+    def tearDown(self) -> None:
+        self.mock_1.reset_mock()
+        self.mock_2.reset_mock()
+
+    def test_start_scope(self):
+        self.sut.start_scope(self.mock_arg)
+        self.mock_1.start_scope.assert_called_with(self.mock_arg)
+        self.mock_2.start_scope.assert_called_with(self.mock_arg)
+
+    def test_finish_scope(self):
+        self.sut.finish_scope(self.mock_arg)
+        self.mock_1.finish_scope.assert_called_with(self.mock_arg)
+        self.mock_2.finish_scope.assert_called_with(self.mock_arg)
+
+    def test_skip_scope(self):
+        self.sut.skip_scope(self.mock_arg)
+        self.mock_1.skip_scope.assert_called_with(self.mock_arg)
+        self.mock_2.skip_scope.assert_called_with(self.mock_arg)
+
+    def test_start_section(self):
+        self.sut.start_section(self.mock_arg)
+        self.mock_1.start_section.assert_called_with(self.mock_arg)
+        self.mock_2.start_section.assert_called_with(self.mock_arg)
+
+    def test_finish_section(self):
+        self.sut.finish_section(self.mock_arg)
+        self.mock_1.finish_section.assert_called_with(self.mock_arg)
+        self.mock_2.finish_section.assert_called_with(self.mock_arg)
+
+    def test_start_item(self):
+        self.sut.start_item(self.mock_arg)
+        self.mock_1.start_item.assert_called_with(self.mock_arg)
+        self.mock_2.start_item.assert_called_with(self.mock_arg)
+
+    def test_finish_item(self):
+        self.sut.finish_item(self.mock_arg)
+        self.mock_1.finish_item.assert_called_with(self.mock_arg)
+        self.mock_2.finish_item.assert_called_with(self.mock_arg)
+
+    def test_info(self):
+        self.sut.info(self.mock_arg)
+        self.mock_1.info.assert_called_with(self.mock_arg)
+        self.mock_2.info.assert_called_with(self.mock_arg)
+
+    def test_detail(self):
+        self.sut.detail(self.mock_arg)
+        self.mock_1.detail.assert_called_with(self.mock_arg)
+        self.mock_2.detail.assert_called_with(self.mock_arg)
+
+    def test_error(self):
+        self.sut.error(self.mock_arg)
+        self.mock_1.error.assert_called_with(self.mock_arg)
+        self.mock_2.error.assert_called_with(self.mock_arg)
+
+    def test_warning(self):
+        self.sut.warning(self.mock_arg)
+        self.mock_1.warning.assert_called_with(self.mock_arg)
+        self.mock_2.warning.assert_called_with(self.mock_arg)
+
+    def test_scope_context_manager(self):
+        with self.sut.scope(self.mock_arg):
+            self.mock_1.start_scope.assert_called_with(self.mock_arg)
+            self.mock_2.start_scope.assert_called_with(self.mock_arg)
+        self.mock_1.finish_scope.assert_called_with(self.mock_arg)
+        self.mock_2.finish_scope.assert_called_with(self.mock_arg)
+
+    def test_scope_context_manager_negative(self):
+        exception = Exception()
+        with self.assertRaises(Exception) as e:
+            with self.sut.scope(self.mock_arg):
+                self.mock_1.start_scope.assert_called_with(self.mock_arg)
+                self.mock_2.start_scope.assert_called_with(self.mock_arg)
+                raise exception
+        self.assertIs(exception, e.exception)
+        self.mock_1.error.assert_called_with(exception)
+        self.mock_1.finish_scope.assert_called_with(self.mock_arg)
+        self.mock_2.error.assert_called_with(exception)
+        self.mock_2.finish_scope.assert_called_with(self.mock_arg)
+
+    def test_section_context_manager(self):
+        with self.sut.section(self.mock_arg):
+            self.mock_1.start_section.assert_called_with(self.mock_arg)
+            self.mock_2.start_section.assert_called_with(self.mock_arg)
+        self.mock_1.finish_section.assert_called_with(self.mock_arg)
+        self.mock_2.finish_section.assert_called_with(self.mock_arg)
+
+    def test_section_context_manager_negative(self):
+        exception = Exception()
+        with self.assertRaises(Exception) as e:
+            with self.sut.section(self.mock_arg):
+                self.mock_1.start_section.assert_called_with(self.mock_arg)
+                self.mock_2.start_section.assert_called_with(self.mock_arg)
+                raise exception
+        self.assertIs(exception, e.exception)
+        self.mock_1.error.assert_called_with(exception)
+        self.mock_1.finish_section.assert_called_with(self.mock_arg)
+        self.mock_2.error.assert_called_with(exception)
+        self.mock_2.finish_section.assert_called_with(self.mock_arg)
+
+    def test_item_context_manager(self):
+        with self.sut.item(self.mock_arg):
+            self.mock_1.start_item.assert_called_with(self.mock_arg)
+            self.mock_2.start_item.assert_called_with(self.mock_arg)
+        self.mock_1.finish_item.assert_called_with()
+        self.mock_2.finish_item.assert_called_with()
+
+    def test_item_context_manager_negative(self):
+        exception = Exception()
+        with self.assertRaises(Exception) as e:
+            with self.sut.item(self.mock_arg):
+                self.mock_1.start_item.assert_called_with(self.mock_arg)
+                self.mock_2.start_item.assert_called_with(self.mock_arg)
+                raise exception
+        self.assertIs(exception, e.exception)
+        self.mock_1.error.assert_called_with(exception)
+        self.mock_1.finish_item.assert_called_with()
+        self.mock_2.error.assert_called_with(exception)
+        self.mock_2.finish_item.assert_called_with()
 
 
 class TestResolveValue(TestCase):

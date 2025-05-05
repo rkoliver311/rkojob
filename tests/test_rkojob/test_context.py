@@ -1,15 +1,75 @@
-from enum import Enum, auto
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob import JobException, Values
-from rkojob.context import JobContextImpl
+from rkojob import JobException, JobScopeStatus, Values
+from rkojob.context import (
+    JobContextImpl,
+    JobScopeStatuses,
+)
 
 
-class StubScopeType(Enum):
-    JOB = auto()
-    STAGE = auto()
-    STEP = auto()
+class TestJobScopeStatuses(TestCase):
+    def test(self) -> None:
+        mock_scope_1 = MagicMock()
+        mock_scope_2 = MagicMock()
+        mock_scope_3 = MagicMock()
+
+        sut = JobScopeStatuses()
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_3))
+
+        sut.start_scope(mock_scope_1)
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_3))
+
+        sut.skip_scope(mock_scope_2)
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.SKIPPED, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_3))
+
+        with self.assertRaises(JobException) as e:
+            sut.finish_scope(mock_scope_2)
+        self.assertEqual("Scope does not match scope on stack.", str(e.exception))
+
+        with self.assertRaises(JobException) as e:
+            sut.start_scope(mock_scope_2)
+        self.assertEqual("Scope status already set.", str(e.exception))
+
+        sut.start_scope(mock_scope_3)
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.SKIPPED, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_3))
+
+        sut.finish_scope()
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.SKIPPED, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.PASSED, sut.get_status(mock_scope_3))
+
+        sut.error("error")
+        sut.finish_scope(mock_scope_1)
+        self.assertEqual(JobScopeStatus.FAILED, sut.get_status(mock_scope_1))
+        self.assertEqual(JobScopeStatus.SKIPPED, sut.get_status(mock_scope_2))
+        self.assertEqual(JobScopeStatus.PASSED, sut.get_status(mock_scope_3))
+
+    def test_finish_item(self) -> None:
+        mock_scope_1 = MagicMock()
+
+        sut = JobScopeStatuses()
+        self.assertEqual(JobScopeStatus.UNKNOWN, sut.get_status(mock_scope_1))
+
+        sut.start_scope(mock_scope_1)
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+
+        sut.start_item("item")
+        self.assertEqual(JobScopeStatus.RUNNING, sut.get_status(mock_scope_1))
+
+        sut.finish_item(error="error")
+        self.assertEqual(JobScopeStatus.FAILING, sut.get_status(mock_scope_1))
+
+        sut.finish_scope()
+        self.assertEqual(JobScopeStatus.FAILED, sut.get_status(mock_scope_1))
 
 
 class TestJobContextImpl(TestCase):
@@ -88,25 +148,20 @@ class TestJobContextImpl(TestCase):
         buz_error = Exception("Buz")
         boz_error = Exception("Boz")
 
-        sut.exception(foo_error)
-        sut.exception(bar_error)
+        sut.status.error(foo_error)
+        sut.status.error(bar_error)
 
         mock_scope = MagicMock()
-        with sut.in_scope(mock_scope):
-            sut.exception(baz_error)
+        sut.status.start_scope(mock_scope)
+        sut.status.error(baz_error)
 
-            mock_scope_2 = MagicMock()
-            with sut.in_scope(mock_scope_2):
-                sut.exception(buz_error)
-            sut.exception(boz_error)
-        self.assertEqual(
-            {
-                tuple(): [foo_error, bar_error],
-                (mock_scope,): [baz_error, boz_error],
-                (mock_scope, mock_scope_2): [buz_error],
-            },
-            sut._exceptions,
-        )
+        mock_scope_2 = MagicMock()
+        sut.status.start_scope(mock_scope_2)
+        sut.status.error(buz_error)
+        sut.status.finish_scope(mock_scope_2)
+
+        sut.status.error(boz_error)
+        sut.status.finish_scope(mock_scope)
 
         self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_exceptions())
         self.assertEqual([baz_error, boz_error, buz_error], sut.get_exceptions(mock_scope))
