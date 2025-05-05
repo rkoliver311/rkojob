@@ -1,10 +1,18 @@
+from typing import cast
+
 from rkojob import (
     JobActionScope,
+    JobConditionalScope,
+    JobConditionalType,
+    JobConditionalValueType,
     JobContext,
     JobException,
     JobGroupScope,
     JobScope,
     JobTeardownScope,
+    job_fail,
+    job_never,
+    resolve_value,
 )
 
 
@@ -20,6 +28,9 @@ class JobRunnerImpl:
         :param scope: The scope to run.
         """
         self._run_scope(context, scope)
+        exceptions: list[Exception] = context.get_exceptions()
+        if exceptions:
+            raise JobException("\n".join([str(e) for e in exceptions]))
 
     def _run_scope(self, context: JobContext, scope: JobScope) -> None:
         # Run and then teardown a scope.
@@ -30,6 +41,12 @@ class JobRunnerImpl:
         teardown: JobTeardownScope | None = scope if isinstance(scope, JobTeardownScope) else None
         if not (group or action or teardown):
             raise self._unknown_scope(context, scope)
+
+        should_skip: bool
+        skip_reason: str
+        should_skip, skip_reason = self._should_skip(context, scope)
+        if should_skip:
+            return
 
         with context.in_scope(scope):
             try:
@@ -55,7 +72,7 @@ class JobRunnerImpl:
                 action.action(context)
             except Exception as e:
                 # Add error to current scope's list of errors
-                raise context.exception(e)
+                context.exception(e)
 
     def _run_group_teardown(
         self, context: JobContext, group: JobGroupScope, *, scope_to_teardown: JobScope | None = None
@@ -83,6 +100,44 @@ class JobRunnerImpl:
             except Exception:
                 # do not raise
                 pass
+
+    def _should_skip(self, context: JobContext, scope: JobScope) -> tuple[bool, str]:
+        if isinstance(scope, JobConditionalScope):
+            run_if: JobConditionalType | None = scope.run_if
+            skip_if: JobConditionalType | None = scope.skip_if
+
+            if skip_if is None and run_if is None:
+                # No condition specified; Use the default.
+                return self._resolve_conditional(context, job_fail)
+            if run_if is None:
+                assert skip_if is not None
+                # No run condition. Check only the skip condition.
+                return self._resolve_conditional(context, skip_if)
+
+            assert run_if is not None
+
+            could_run: bool
+            reason: str
+            could_run, reason = self._resolve_conditional(context, run_if)
+
+            if not could_run or skip_if is None:
+                # The scope should not run or there is no additional condition to consider.
+                # Use the run condition.
+                return not could_run, reason
+
+            # Scope could run but may still be skipped.
+            return self._resolve_conditional(context, skip_if)
+
+        # If it is not a conditional scope, never skip.
+        return self._resolve_conditional(context, job_never)
+
+    def _resolve_conditional(self, context: JobContext, conditional: JobConditionalType) -> tuple[bool, str]:
+        value: JobConditionalValueType | None = cast(
+            JobConditionalValueType, resolve_value(conditional, context=context)
+        )
+        if isinstance(value, tuple):
+            return value
+        return bool(value), ""
 
     def _unknown_scope(self, context: JobContext, scope: JobScope) -> Exception:
         return JobException(f"Unknown scope type: {scope.type}")

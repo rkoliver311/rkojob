@@ -6,6 +6,10 @@ from rkojob import (
     JobContext,
     JobException,
     JobScopeType,
+    ValueRef,
+    job_success,
+    scope_fail,
+    scope_success,
 )
 from rkojob.factories import JobContextFactory
 from rkojob.runner import JobRunnerImpl
@@ -19,11 +23,13 @@ class StubGroupScope:
 
 
 class StubActionScope:
-    def __init__(self, name, type, action=None, teardown=None):
+    def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None):
         self.name = name
         self.type = type
         self.action = action
         self.teardown = teardown
+        self.run_if = run_if
+        self.skip_if = skip_if
 
 
 class StubScopeType(Enum):
@@ -74,6 +80,8 @@ class TestJobRunnerImpl(TestCase):
         self.assertEqual(
             [
                 "Action: job->stage1->step1.1",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
                 "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
@@ -261,3 +269,204 @@ class TestJobRunnerImpl(TestCase):
         )
 
         return job
+
+    def test_run_if_scope_fail(self) -> None:
+        side_effects: list[str] = []
+
+        job = self._create_job(side_effects)
+        job.scopes[0].scopes[1].run_if = scope_fail(job.scopes[0])
+        JobRunnerImpl().run(JobContextFactory.create(), job)
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage2->step2.1",
+                "Action: job->stage2->step2.2",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Action: job->stage3->step3.1",
+                "Action: job->stage3->step3.2",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+        side_effects.clear()
+        job.scopes[0].scopes[0].action = self._action(side_effects, fail=True)
+
+        with self.assertRaises(Exception) as e:
+            JobRunnerImpl().run(JobContextFactory.create(), job)
+        self.assertEqual("Action failed: job->stage1->step1.1", str(e.exception))
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.2",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_run_if_property(self) -> None:
+        side_effects: list[str] = []
+
+        job = self._create_job(side_effects)
+        job.scopes[0].scopes[1].run_if = ValueRef((False, "Don't run me."))
+        JobRunnerImpl().run(JobContextFactory.create(), job)
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage2->step2.1",
+                "Action: job->stage2->step2.2",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Action: job->stage3->step3.1",
+                "Action: job->stage3->step3.2",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_could_run_but_skip(self) -> None:
+        side_effects: list[str] = []
+        job = self._create_job(side_effects)
+        job.scopes[1].scopes[1].run_if = True
+        job.scopes[1].scopes[1].skip_if = True
+        JobRunnerImpl().run(JobContextFactory.create(), job)
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage1->step1.2",
+                "Action: job->stage2->step2.1",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Action: job->stage3->step3.1",
+                "Action: job->stage3->step3.2",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_skip_if_fail(self) -> None:
+        side_effects: list[str] = []
+        job = self._create_job(side_effects)
+        job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
+        with self.assertRaises(Exception) as e:
+            JobRunnerImpl().run(JobContextFactory.create(), job)
+        self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_skip_if_fail_teardown(self) -> None:
+        side_effects: list[str] = []
+        job = self._create_job(side_effects)
+        job.scopes[1].scopes[1].teardown = self._teardown(
+            job.scopes[1].scopes[1].name, side_effects, StubScopeType.STAGE, fail=True
+        )
+
+        JobRunnerImpl().run(JobContextFactory.create(), job)
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage1->step1.2",
+                "Action: job->stage2->step2.1",
+                "Action: job->stage2->step2.2",
+                "Teardown stage2: step2.1",
+                "Action: job->stage3->step3.1",
+                "Action: job->stage3->step3.2",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_skip_if_scope_success(self) -> None:
+        side_effects: list[str] = []
+        job = self._create_job(side_effects)
+        job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
+        job.scopes[1].scopes[0].skip_if = scope_success(job.scopes[0])
+        with self.assertRaises(Exception) as e:
+            JobRunnerImpl().run(JobContextFactory.create(), job)
+        self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage2->step2.1",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )
+
+    def test_skip_if_success(self) -> None:
+        class StubScope:
+            def __init__(self, name, type, run_if=None, skip_if=None):
+                self.name = name
+                self.type = type
+                self.run_if = run_if
+                self.skip_if = skip_if
+
+        context: JobContext = JobContextFactory.create()
+        sut = JobRunnerImpl()
+        step = StubScope("step", 3, skip_if=job_success)
+        self.assertEqual((True, "Job is succeeding."), sut._should_skip(context, step))
+
+    def test_skip_if_property(self) -> None:
+        class StubScope:
+            def __init__(self, name, type, run_if=None, skip_if=None):
+                self.name = name
+                self.type = type
+                self.run_if = run_if
+                self.skip_if = skip_if
+
+        context: JobContext = JobContextFactory.create()
+        sut = JobRunnerImpl()
+        step = StubScope("step", 3, skip_if=ValueRef((True, "Skip me")))
+        self.assertEqual((True, "Skip me"), sut._should_skip(context, step))
+
+    def test_skip_if_value(self) -> None:
+        class StubScope:
+            def __init__(self, name, type, run_if=None, skip_if=None):
+                self.name = name
+                self.type = type
+                self.run_if = run_if
+                self.skip_if = skip_if
+
+        context: JobContext = JobContextFactory.create()
+        sut = JobRunnerImpl()
+        step = StubScope("step", 3, skip_if=True)
+        self.assertEqual((True, ""), sut._should_skip(context, step))

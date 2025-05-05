@@ -10,8 +10,8 @@ from typing import (
 from rkojob import (
     JobException,
     JobScope,
+    Values,
 )
-from rkojob.values import Values
 
 
 class JobContextState:
