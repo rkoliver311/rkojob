@@ -8,7 +8,9 @@ from rkojob import (
     JobException,
     JobResolvableValue,
     assign_value,
+    resolve_map,
     resolve_value,
+    resolve_values,
     unassign_value,
 )
 from rkojob.job import JobBaseAction
@@ -29,13 +31,15 @@ class ShellAction(JobBaseAction):
         self._raise_on_error: bool = raise_on_error
 
     def action(self, context: JobContext) -> None:
-        shell: Shell = Shell(**self._kwargs)
-        command: str = shlex.join(self._args)
+        args: list[Any] = resolve_values(self._args, context=context)
+        kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
+        shell: Shell = Shell(**kwargs)
+        command: str = shlex.join(args)
 
         result: ShellResult | None = None
         try:
             context.status.start_item(f"Executing {command}")
-            result = shell(*self._args)
+            result = shell(*args)
             context.status.finish_item()
         except ShellException as e:
             result = e.result

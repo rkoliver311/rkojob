@@ -8,11 +8,14 @@ from rkojob import (
     JobStatusCollector,
     ValueKey,
     assign_value,
+    lazy_format,
+    resolve_map,
     resolve_value,
+    resolve_values,
     unassign_value,
 )
 from rkojob.factories import JobContextFactory
-from rkojob.values import ValueRef
+from rkojob.values import ValueRef, Values
 
 
 class TestJobException(TestCase):
@@ -275,6 +278,43 @@ class TestAssignValue(TestCase):
         with self.assertRaises(JobException) as e:
             assign_value("foo", "value")  # type: ignore[arg-type]
         self.assertEqual("Unable to assign value to foo", str(e.exception))
+
+
+class TestResolveValues(TestCase):
+    def test_no_context(self) -> None:
+        self.assertEqual(["value1", 123], resolve_values([ValueRef("value1"), ValueRef(123)]))
+
+    def test_with_context(self) -> None:
+        self.assertEqual(
+            ["value1", 123],
+            resolve_values([ValueRef("value1"), ValueKey("int_key")], context=MagicMock(values=Values(int_key=123))),
+        )
+
+
+class TestResolveMap(TestCase):
+    def test_no_context(self) -> None:
+        self.assertEqual({"ref1": "value1", "int_prop": 123}, resolve_map(ref1=ValueRef("value1"), int_prop=123))
+
+    def test_with_context(self) -> None:
+        self.assertEqual(
+            {"ref1": "value1", "ref2": 123},
+            resolve_map(
+                ref1=ValueRef("value1"), ref2=ValueKey("int_key"), context=MagicMock(values=Values(int_key=123))
+            ),
+        )
+
+
+class TestLazyFormat(TestCase):
+    def test(self) -> None:
+        ref1 = ValueRef("value1")
+        ref2 = ValueRef("value2")
+        sut = lazy_format("{ref1}, {ref2}", ref1=ref1, ref2=ref2)
+        self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock()))
+
+    def test_with_context(self) -> None:
+        ref2 = ValueRef("value2")
+        sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
+        self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=Values(ref1="value1"))))
 
 
 class TestUnassignValue(TestCase):

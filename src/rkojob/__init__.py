@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -366,6 +367,45 @@ def resolve_value(
         return value(context) if context else default
 
     return cast(T_co, value)
+
+
+def resolve_values(values: Iterable[JobResolvableValue[Any]], *, context: JobContext | None = None) -> list[Any]:
+    return [resolve_value(value, context=context) for value in values]
+
+
+def resolve_map(
+    values: dict[Any, JobResolvableValue[Any]] | None = None, context: JobContext | None = None, **kwargs
+) -> dict[Any, Any]:
+    if values is None:
+        values = kwargs
+    return {key: resolve_value(value, context=context) for key, value in values.items()}
+
+
+FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([^{}!:]+)(?:![rs])?(?::[^{}]+)?\}")
+
+
+def lazy_format(value: str, **kwargs) -> JobResolvableValue[str]:
+    """
+    Lazily format a string using the provided `JobResolvableValue` instances and
+    values from the *context* passed into `resolve_value`.
+
+    :param value: The format string contain `{placeholder}` values.
+    :param kwargs: `JobResolvableValue` to use to replace placeholders.
+    :returns: A `JobResolvableValue[str]` instance that can be resolved using `resolve_value`.
+    """
+
+    def _wrapped(context: JobContext) -> str:
+        # Provided values
+        values: dict[str, Any] = {**kwargs}
+        # Referenced values
+        template_keys: list[str] = FORMAT_MAP_KEY_PATTERN.findall(value)
+        # Missing values
+        missing_keys: set[str] = template_keys - values.keys()
+        # Add missing values from the context
+        values.update({key: ValueKey(key) for key in missing_keys})
+        return value.format_map(resolve_map(values, context=context))
+
+    return _wrapped
 
 
 JobAssignableValue: TypeAlias = ValueConsumer[T] | ValueKey[T]

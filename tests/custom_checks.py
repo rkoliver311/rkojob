@@ -5,7 +5,7 @@ from rkojob.job import (
     Job,
     JobStage,
     JobStep,
-    deferred_init,
+    lazy_action,
 )
 from rkojob.values import ValueKey
 
@@ -17,7 +17,7 @@ job = Job(
             steps=[
                 JobStep(
                     "verify-test-structure",
-                    action=deferred_init(
+                    action=lazy_action(
                         VerifyTestStructure,
                         src_path=ValueKey("src_path"),
                         tests_path=ValueKey("tests_path"),
