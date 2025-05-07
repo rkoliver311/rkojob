@@ -1,9 +1,10 @@
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from rkojob.values import (
     ComputedValue,
     EnvironmentVariable,
+    LazyValue,
     MappedValueProvider,
     NoValue,
     ValueKey,
@@ -128,6 +129,34 @@ class TestComputedValue(TestCase):
         self.assertFalse(ComputedValue(None).has_value)  # type: ignore[arg-type]
 
 
+class TestLazyValue(TestCase):
+    def test_value(self) -> None:
+        self.assertEqual("value", LazyValue(lambda: "value").value)
+
+    def test_no_value(self) -> None:
+        with self.assertRaises(ValueError) as e:
+            _ = LazyValue(None).value  # type: ignore[arg-type]
+        self.assertEqual("LazyValue has no value", str(e.exception))
+
+    def test_no_value_with_name(self) -> None:
+        with self.assertRaises(ValueError) as e:
+            _ = LazyValue(None, name="name").value  # type: ignore[arg-type]
+        self.assertEqual("LazyValue(name=name) has no value", str(e.exception))
+
+    def test_has_value(self) -> None:
+        self.assertTrue(LazyValue(lambda: "value").has_value)
+
+    def test_has_value_no_value(self) -> None:
+        self.assertFalse(LazyValue(None).has_value)  # type: ignore[arg-type]
+
+    def test_compute_only_once(self) -> None:
+        func = MagicMock(return_value="value")
+        sut = LazyValue(func)
+        self.assertEqual("value", sut.get())
+        self.assertEqual("value", sut.value)
+        func.assert_called_once()
+
+
 class TestAsValueRef(TestCase):
     def test(self) -> None:
         ref: ValueRef[str] = ValueRef("value")
@@ -230,6 +259,16 @@ class TestValues(TestCase):
         with self.assertRaises(ValueError) as e:
             _ = int_ref.get()
         self.assertEqual("Values has no value associated with key 'int_ref'", str(e.exception))
+
+    def test_keys(self) -> None:
+        sut = Values(int_prop=123, str_prop="abc")
+        self.assertEqual({"int_prop", "str_prop"}, sut.keys())
+
+        sut.unset("int_prop")
+        self.assertEqual({"str_prop"}, sut.keys())
+
+        sut.unset("str_prop")
+        self.assertEqual(set(), sut.keys())
 
 
 class TestEnvironmentVariable(TestCase):
