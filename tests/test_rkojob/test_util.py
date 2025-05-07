@@ -3,7 +3,16 @@ from tempfile import NamedTemporaryFile
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob.util import Shell, ShellException, ShellResult, as_path
+from rkojob.util import (
+    Shell,
+    ShellException,
+    ShellResult,
+    ToolBuilder,
+    ToolRunner,
+    as_path,
+    to_camel,
+    to_kebab,
+)
 
 
 class TestAsPath(TestCase):
@@ -122,3 +131,103 @@ class TestShell(TestCase):
         sut = Shell()
         result: ShellResult = sut("echo", "Hello, world!")
         self.assertEqual("Hello, world!\n", result.stdout)
+
+
+class TestToCamel(TestCase):
+    def test_kebab_to_camel(self):
+        self.assertEqual(to_camel("tool-runner"), "toolRunner")
+        self.assertEqual(to_camel("parse-http-response"), "parseHttpResponse")
+        self.assertEqual(to_camel("get-url-from-html"), "getUrlFromHtml")
+
+    def test_snake_to_camel(self):
+        self.assertEqual(to_camel("tool_runner"), "toolRunner")
+        self.assertEqual(to_camel("parse_http_response"), "parseHttpResponse")
+        self.assertEqual(to_camel("get_url_from_html"), "getUrlFromHtml")
+
+    def test_single_word(self):
+        self.assertEqual(to_camel("tool"), "tool")
+        self.assertEqual(to_camel("tool_"), "tool")
+        self.assertEqual(to_camel("tool-"), "tool")
+
+    def test_mixed_case(self):
+        self.assertEqual(to_camel("tool-Runner"), "toolRunner")
+        self.assertEqual(to_camel("tool_Runner"), "toolRunner")
+
+
+class TestToKebab(TestCase):
+    def test_camel_to_kebab(self):
+        self.assertEqual(to_kebab("ToolRunner"), "tool-runner")
+        self.assertEqual(to_kebab("parseHTTPResponse"), "parse-http-response")
+        self.assertEqual(to_kebab("getURLFromHTML"), "get-url-from-html")
+
+    def test_snake_to_kebab(self):
+        self.assertEqual(to_kebab("tool_runner"), "tool-runner")
+        self.assertEqual(to_kebab("parse_http_response"), "parse-http-response")
+        self.assertEqual(to_kebab("get_url_from_html"), "get-url-from-html")
+
+    def test_kebab_to_kebab(self):
+        self.assertEqual(to_kebab("tool-runner"), "tool-runner")
+        self.assertEqual(to_kebab("parse-http-response"), "parse-http-response")
+
+    def test_mixed_and_redundant(self):
+        self.assertEqual(to_kebab("tool__Runner"), "tool-runner")
+        self.assertEqual(to_kebab("tool--Runner"), "tool-runner")
+        self.assertEqual(to_kebab("Tool__Runner--X"), "tool-runner-x")
+
+    def test_single_word(self):
+        self.assertEqual(to_kebab("Tool"), "tool")
+        self.assertEqual(to_kebab("tool"), "tool")
+
+
+class TestToolBuilder(TestCase):
+    def test_commands(self) -> None:
+        sut = ToolBuilder("command")
+        self.assertEqual(["command"], sut._commands)
+        self.assertEqual(["command", "sub_command"], sut.sub_command._commands)
+
+    def test_prepare(self) -> None:
+        runner: ToolRunner = ToolBuilder().command.sub_command.prepare(
+            "arg1", "--arg2", "value2", arg3="value3", arg_4=1234
+        )
+        self.assertEqual(
+            ["command", "sub-command", "arg1", "--arg2", "value2", "--arg3", "value3", "--arg-4", 1234],
+            runner.command,
+        )
+
+    def test_call(self) -> None:
+        mock_shell = MagicMock()
+        ToolBuilder(shell=mock_shell).command.sub_command("arg1", "--arg2", "value2", arg3="value3", arg_4=1234)
+        mock_shell.assert_called_once_with(
+            "command", "sub-command", "arg1", "--arg2", "value2", "--arg3", "value3", "--arg-4", 1234
+        )
+
+
+class TestToolRunner(TestCase):
+    def test_call(self) -> None:
+        mock_shell = MagicMock()
+        sut: ToolRunner = ToolRunner(
+            ["command", "sub_command"], "arg1", "--arg2", "value2", arg3="value3", arg_4=1234, shell=mock_shell
+        )
+        sut()
+        mock_shell.assert_called_once_with(
+            "command", "sub-command", "arg1", "--arg2", "value2", "--arg3", "value3", "--arg-4", 1234
+        )
+
+    def test_fixup_commands(self) -> None:
+        self.assertEqual(
+            ["part1", "part-2", "part-three"], ToolRunner._fixup_commands(["part1", "part_2", "part-three"])
+        )
+
+    def test_fixup_args(self) -> None:
+        self.assertEqual(
+            ["arg1", "--arg2", "arg3", True, 123, "a", 1, True, False],
+            ToolRunner._fixup_args(["arg1", "--arg2", None, "arg3", True, 123, ["a", 1, (True, False)]]),
+        )
+
+    def test_fixup_kwargs(self) -> None:
+        self.assertEqual(
+            ["--arg-one", "one", "--arg_2", "two", "-a", "--a-list", "a", "b", "c"],
+            ToolRunner._fixup_kwargs(
+                {"arg_one": "one", "--arg_2": "two", "a": True, "enable_arg": False, "a_list": ["a", "b", "c"]}
+            ),
+        )

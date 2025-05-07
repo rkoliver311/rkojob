@@ -14,7 +14,12 @@ from rkojob import (
     unassign_value,
 )
 from rkojob.job import JobBaseAction
-from rkojob.util import Shell, ShellException, ShellResult, as_path
+from rkojob.util import (
+    Shell,
+    ShellException,
+    ShellResult,
+    as_path,
+)
 from rkojob.values import (
     ValueRef,
     as_value_ref,
@@ -68,7 +73,7 @@ class VerifyTestStructure(JobBaseAction):
         src_path: JobResolvableValue[str | PathLike],
         tests_path: JobResolvableValue[str | PathLike],
         errors: ValueRef[list[str]] | None = None,
-    ):
+    ) -> None:
         super().__init__()
         self.src_path: JobResolvableValue[str | PathLike] = src_path or ValueRef(name="src_path")
         self.tests_path: JobResolvableValue[str | PathLike] = tests_path or ValueRef(name="tests_path")
