@@ -20,6 +20,7 @@ from typing import (
 from rkojob.delegates import delegate
 from rkojob.values import (
     ComputedValue,
+    EnvironmentVariable,
     ValueConsumer,
     ValueKey,
     ValueProvider,
@@ -279,6 +280,13 @@ class JobContext(Protocol):
     """
 
 
+context_value: type[ValueKey] = ValueKey
+"""Convenience alias for a value provided by the context by name."""
+
+environment_variable: type[EnvironmentVariable] = EnvironmentVariable
+"""Convenience alias for a value provided by an environment variable."""
+
+
 class JobScopeType(Protocol):
     """
     Classifies a `JobScope`, typically implemented as an ``Enum``.
@@ -327,7 +335,16 @@ class JobCallable(Protocol[R_co]):
     def __call__(self, context: JobContext) -> R_co: ...
 
 
+# Convenience functions for reading values from provider-like objects.
+# This includes objects that hold values (ex. ``ValueRef``),
+# identify values (ex. ``ValueKey``), return values (ex. ``JobCallable``),
+# or are values themselves.
+
 JobResolvableValue: TypeAlias = ValueKey[T_co] | ValueProvider[T_co] | JobCallable[T_co] | T_co
+"""
+TypeAlias that represents all types that are considered "resolvable",
+including those that require a ``JobContext``.
+"""
 
 
 @overload
@@ -355,6 +372,14 @@ def resolve_value(value: T, *, context: JobContext | None = ..., default: T_co |
 def resolve_value(
     value: JobResolvableValue[T_co], *, context: JobContext | None = None, default: T_co | None = None
 ) -> T_co | None:
+    """
+    Resolve a ``JobResolvableValue`` using the optional `context` if needed.
+
+    :param value: The value to resolve.
+    :param context: An optional ``JobContext`` to aid in value resolution.
+    :param default: An optional default value to return if the value cannot be resolved. For example, if the `value` is
+     a ``ValueRef`` that holds no value or the value is a ``ValueKey`` but no context was provided.
+    """
     if isinstance(value, ValueKey):
         if not context:
             return default
@@ -408,10 +433,23 @@ def lazy_format(value: str, **kwargs) -> JobResolvableValue[str]:
     return _wrapped
 
 
+# Convenience functions for assigning values to consumer-like instances.
+# This includes objects that accept values (ex. ``ValueConsumer``, ``ValueRef``)
+# and those that identify assignable values (ex. ``ValueKey``) within the context of a...context.
+
 JobAssignableValue: TypeAlias = ValueConsumer[T] | ValueKey[T]
+"""TypeAlias for objects who can have a value assigned to them, including those that require a ``JobContext``."""
 
 
 def assign_value(assignable: JobAssignableValue[T], value: T, *, context: JobContext | None = None) -> None:
+    """
+    Assign a value to a ``JobAssignableValue``.
+
+    :param assignable: The ``JobAssignableValue`` instance to assign a value to.
+    :param value: The value to assign to `assignable`.
+    :param context: An optional ``JobContext`` which is required only if `assignable`
+     references a context value (i.e. ``ValueKey``).
+    """
     if isinstance(assignable, ValueConsumer):
         assignable.set(value)
     elif isinstance(assignable, ValueKey):
@@ -423,6 +461,13 @@ def assign_value(assignable: JobAssignableValue[T], value: T, *, context: JobCon
 
 
 def unassign_value(assignable: JobAssignableValue[T], *, context: JobContext | None = None) -> None:
+    """
+    Unassign (unset) a value on a ``JobAssignableValue``.
+
+    :param assignable: The ``JobAssignableValue`` instance to unset.
+    :param context: An optional ``JobContext`` which is required only if `assignable`
+     references a context value (i.e. ``ValueKey``).
+    """
     if isinstance(assignable, ValueConsumer):
         assignable.unset()
     elif isinstance(assignable, ValueKey):
@@ -434,28 +479,40 @@ def unassign_value(assignable: JobAssignableValue[T], *, context: JobContext | N
 
 
 JobConditionalValueType: TypeAlias = bool | tuple[bool, str]
+"""TypeAlias for the return type used by scope conditions `run_if` and `skip_if`."""
+
 JobConditionalType: TypeAlias = JobResolvableValue[JobConditionalValueType]
+"""TypeAlias for the type used by scope conditions `run_if` and `skip_if`."""
 
 job_always: Final[JobConditionalType] = ComputedValue[JobConditionalValueType](lambda: (True, "Always"))
+"""Scope condition that always returns ``True``."""
+
 job_never: Final[ValueProvider[JobConditionalValueType]] = ComputedValue(lambda: (False, "Never"))
+"""Scope condition that always returns ``False``."""
 
 
-def job_fail(context: JobContext) -> tuple[bool, str]:
+def job_failing(context: JobContext) -> tuple[bool, str]:
+    """Scope condition that returns ``True`` if *any* errors have been recorded."""
     return bool(context.get_exceptions()), "Job has failures."
 
 
-def job_success(context: JobContext) -> tuple[bool, str]:
+def job_succeeding(context: JobContext) -> tuple[bool, str]:
+    """Scope condition that returns ``True`` if *no* errors have been recorded."""
     return bool(not context.get_exceptions()), "Job is succeeding."
 
 
-def scope_fail(scope: JobScope) -> JobConditionalType:
+def scope_failing(scope: JobScope) -> JobConditionalType:
+    """Scope condition that returns ``True`` if errors have been recorded for the provided `scope`."""
+
     def _wrapped(context: JobContext) -> tuple[bool, str]:
         return bool(context.get_exceptions(scope)), f"{scope} has failures."
 
     return _wrapped
 
 
-def scope_success(scope: JobScope) -> JobConditionalType:
+def scope_succeeding(scope: JobScope) -> JobConditionalType:
+    """Scope condition that returns ``True`` if *no* errors have been recorded for the provided `scope`."""
+
     def _wrapped(context: JobContext) -> tuple[bool, str]:
         return bool(not context.get_exceptions(scope)), f"{scope} is succeeding."
 
@@ -464,6 +521,13 @@ def scope_success(scope: JobScope) -> JobConditionalType:
 
 @runtime_checkable
 class JobConditionalScope(Protocol):
+    """
+    Protocol for a scope that can be conditionally run and skipped.
+
+    :ivar run_if: Whether the scope should be run.
+    :ivar skip_if: Whether the scope should be skipped, even if it is eligible to run.
+    """
+
     run_if: JobConditionalType | None
     skip_if: JobConditionalType | None
 

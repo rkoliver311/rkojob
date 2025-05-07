@@ -7,9 +7,9 @@ from rkojob import (
     JobException,
     JobScopeType,
     ValueRef,
-    job_success,
-    scope_fail,
-    scope_success,
+    job_succeeding,
+    scope_failing,
+    scope_succeeding,
 )
 from rkojob.factories import JobContextFactory
 from rkojob.runner import JobRunnerImpl
@@ -267,11 +267,11 @@ class TestJobRunnerImpl(TestCase):
 
         return job
 
-    def test_run_if_scope_fail(self) -> None:
+    def test_run_if_scope_failing(self) -> None:
         side_effects: list[str] = []
 
         job = self._create_job(side_effects)
-        job.scopes[0].scopes[1].run_if = scope_fail(job.scopes[0])
+        job.scopes[0].scopes[1].run_if = scope_failing(job.scopes[0])
         JobRunnerImpl().run(JobContextFactory.create(), job)
 
         self.assertEqual(
@@ -399,7 +399,7 @@ class TestJobRunnerImpl(TestCase):
         side_effects: list[str] = []
         job = self._create_job(side_effects)
         job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
-        job.scopes[1].scopes[0].skip_if = scope_success(job.scopes[0])
+        job.scopes[1].scopes[0].skip_if = scope_succeeding(job.scopes[0])
         with self.assertRaises(Exception) as e:
             JobRunnerImpl().run(JobContextFactory.create(), job)
         self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
@@ -425,7 +425,7 @@ class TestJobRunnerImpl(TestCase):
 
         context: JobContext = JobContextFactory.create()
         sut = JobRunnerImpl()
-        step = StubScope("step", 3, skip_if=job_success)
+        step = StubScope("step", 3, skip_if=job_succeeding)
         self.assertEqual((True, "Job is succeeding."), sut._should_skip(context, step))
 
     def test_skip_if_property(self) -> None:
