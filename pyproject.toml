@@ -1,0 +1,17 @@
+[project]
+name = "rkojob"
+version = "0.1.0"
+description = "A job definition and execution framework."
+authors = [
+    { name = "R.K. Oliver", email = "robert.k.oliver@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.tox]
+legacy_tox_ini = true
