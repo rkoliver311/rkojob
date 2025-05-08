@@ -1,0 +1,3 @@
+[run]
+omit =
+    src/rkojob/__main__.py

@@ -12,7 +12,8 @@ from rkojob import (
     JobContext,
     JobException,
     JobScopeType,
-    resolve_value,
+    resolve_map,
+    resolve_values,
 )
 
 
@@ -48,7 +49,18 @@ R = TypeVar("R")
 P = ParamSpec("P")
 
 
-def deferred_init(action_type: Type[JobAction], *args, **kwargs) -> JobCallable[None]:
+def lazy_action(action_type: Type[JobAction], *args, **kwargs) -> JobCallable[None]:
+    """
+    Defer the instantiation of a `JobAction` instance so that it's `__init__` args
+    can be resolved using the *context* at the time of execution. `JobAction` implementations
+    that perform their own argument resolution do not need to be lazily initialized.
+
+    :param action_type: The type of action to instantiate.
+    :param args: The positional arguments of the action's `__init__` method.
+    :param kwargs: The keyword arguments of the action's `__init__` method.
+    :returns: A `JobAction` instance that wraps *action_type* and will initialize it at the time of execution.
+    """
+
     class _Wrapper(JobBaseAction):
         def __init__(self) -> None:
             super().__init__()
@@ -57,8 +69,8 @@ def deferred_init(action_type: Type[JobAction], *args, **kwargs) -> JobCallable[
         def _get_action_instance(self, context: JobContext) -> JobAction:
             if self._action_instance is None:
                 self._action_instance = action_type(
-                    *[resolve_value(arg, context=context) for arg in args],
-                    **{key: resolve_value(value, context=context) for key, value in kwargs.items()},
+                    *resolve_values(args, context=context),
+                    **resolve_map(kwargs, context=context),
                 )
             return self._action_instance
 

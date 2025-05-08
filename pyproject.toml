@@ -9,6 +9,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 
+# CLI entry point
+[project.scripts]
+rkojob = "rkojob.cli:main"
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"

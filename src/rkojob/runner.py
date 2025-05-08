@@ -11,7 +11,7 @@ from rkojob import (
     JobScope,
     JobScopeStatus,
     JobTeardownScope,
-    job_fail,
+    job_failing,
     job_never,
     resolve_value,
 )
@@ -129,7 +129,7 @@ class JobRunnerImpl:
 
             if skip_if is None and run_if is None:
                 # No condition specified; Use the default.
-                return self._resolve_conditional(context, job_fail)
+                return self._resolve_conditional(context, job_failing)
             if run_if is None:
                 assert skip_if is not None
                 # No run condition. Check only the skip condition.

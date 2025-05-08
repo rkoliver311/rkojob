@@ -17,7 +17,7 @@ from rkojob.job import (
     JobStage,
     JobStageBuilder,
     JobStep,
-    deferred_init,
+    lazy_action,
 )
 
 
@@ -252,7 +252,7 @@ class TestDeferredInit(TestCase):
                 self.name = name
                 self.type = type
 
-        sut = deferred_init(FooAction, ["foo"], foo="foo")
+        sut = lazy_action(FooAction, ["foo"], foo="foo")
         action_instance = sut._get_action_instance(MagicMock())  # type: ignore[attr-defined]
         self.assertEqual(["foo"], action_instance.side_effects)
         self.assertEqual("foo", action_instance.foo)
@@ -272,7 +272,7 @@ class TestDeferredInit(TestCase):
         values.set("bar_key", "bar")
         mock_context = MagicMock(values=values)
 
-        sut = deferred_init(FooAction, ValueKey[str]("foo_key"), foo=ValueKey[str]("bar_key"))
+        sut = lazy_action(FooAction, ValueKey[str]("foo_key"), foo=ValueKey[str]("bar_key"))
         action_instance = sut._get_action_instance(mock_context)  # type: ignore[attr-defined]
         self.assertEqual(["foo"], action_instance.side_effects)
         self.assertEqual("bar", action_instance.foo)

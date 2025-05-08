@@ -19,50 +19,52 @@ rkoJob is a set of tools for running structured jobs with a focus on CI/CD.
 `build_test_deploy.py`:
 
     from pathlib import Path
-    from rkojob.actions import ShellAction
+    
+    from rkojob import context_value
+    from rkojob.actions import ShellAction, ToolActionBuilder
     from rkojob.factories import JobContextFactory, JobRunnerFactory
     from rkojob.job import JobBuilder
-    from rkojob.values import ComputedValue, ValueKey
+    from rkojob.values import ComputedValue
     
+    # Dynamic bindings for pip and cat
+    pip = ToolActionBuilder("pip")
+    cat = ToolActionBuilder("cat")
+    
+    # Helper function to check whether a file exists
+    def path_exists(path: str) -> ComputedValue[bool]: return ComputedValue(lambda: Path(path).exists())
+        
     with JobBuilder("build-test-deploy") as job_builder:
-    
         with job_builder.stage("setup") as setup_stage:
-    
             with setup_stage.step("install-dependencies") as install_dependencies:
-                install_dependencies.action = ShellAction("pip", "install" "-r", "requirements.txt")
+                install_dependencies.action = pip.install(requirement="requirements.txt")
     
         with job_builder.stage("build") as build_stage:
-    
             with build_stage.step("build") as build:
-                build.action=ShellAction("scripts/build.sh")
+                build.action = ShellAction("scripts/build.sh")
     
             with build_stage.step("log-errors") as log_errors:
-                log_errors.action = ShellAction("cat", "build/errors.log"),
-                log_errors.run_if = ComputedValue(lambda: Path("build/errors.log").exists())
+                log_errors.action = cat("build/errors.log"),
+                log_errors.run_if = path_exists("build/errors.log")
     
         with job_builder.stage("test") as test_stage:
-            
             with test_stage.step("test") as test:
                 test.action = ShellAction("scripts/test.sh")
     
             with test_stage.step("log-errors") as log_errors:
-                log_errors.action = ShellAction("cat", "test/errors.log"),
-                log_errors.run_if = ComputedValue(lambda: Path("test/errors.log").exists())
+                log_errors.action = cat("test/errors.log"),
+                log_errors.run_if = path_exists("test/errors.log")
     
         with job_builder.stage("deploy") as deploy_stage:
-            
             with deploy_stage.step("deploy") as deploy:
                 deploy.action = ShellAction("scripts/deploy.sh")
-                deploy.skip_if = ValueKey("dry_run")
+                deploy.skip_if = context_value("dry_run")
     
     job = job_builder.build()
-    
-    # Run the job
-    runner = JobRunnerFactory.create()
-    context = JobContextFactory.create(values=dict(dry_run=True))
-    
-    runner.run(context, job)
 
+
+Running the job:
+
+    $ rkojob --job-module build_and_test --job-name job --values dry_run=true
 
 ## Core Classes
 
@@ -76,8 +78,8 @@ The Job runner orchestrates the execution of the job.
 
 ### Job, JobStage, and JobStep
 
-Primary concrete implementations of the `JobScope` protocol.
+Concrete implementations of the `JobScope` protocol.
 
 ### Actions
 
-The actual work of a job is performed by actions. The simplest action is a function that takes a `JobContext` parameter.
+Actions are what perform the actual work of the job. Actions can be any object that implements the `JobCallable[None]` protocol.  
