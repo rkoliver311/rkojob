@@ -18,6 +18,8 @@ from rkojob.util import (
     Shell,
     ShellException,
     ShellResult,
+    ToolBuilder,
+    ToolRunner,
     as_path,
 )
 from rkojob.values import (
@@ -42,28 +44,44 @@ class ShellAction(JobBaseAction):
         command: str = shlex.join(args)
 
         result: ShellResult | None = None
-        try:
-            context.status.start_item(f"Executing {command}")
-            result = shell(*args)
-            context.status.finish_item()
-        except ShellException as e:
-            result = e.result
-            if self._raise_on_error:
-                # To avoid double-reporting the error, record only the non-zero return code before raising the error
-                context.status.finish_item(f"return_code={result.return_code}")
-                raise
-            else:
-                # Record the error since we will not raise it.
-                context.status.finish_item(error=e)
-        finally:
-            if result:
-                assign_value(self.result, result)
-                if result.stdout:
-                    context.status.output(result.stdout, label="stdout")
-                if result.stderr:
-                    context.status.output(result.stderr, label="stderr")
-            else:
-                unassign_value(self.result)
+        with context.status.section(f"Executing {command}"):
+            try:
+                result = shell(*args)
+            except ShellException as e:
+                result = e.result
+                if self._raise_on_error:
+                    raise
+                else:
+                    # Record the error instead of raising it
+                    context.status.error(e)
+            finally:
+                if result:
+                    assign_value(self.result, result)
+                    if result.stdout:
+                        context.status.output(result.stdout, label="stdout")
+                    if result.stderr:
+                        context.status.output(result.stderr, label="stderr")
+                else:
+                    unassign_value(self.result)
+
+
+class ToolActionBuilder:
+    def __init__(
+        self, *parts: str, runner_type: type[ToolRunner] | None = None, tool_builder: ToolBuilder | None = None
+    ) -> None:
+        self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts)
+        self._runner_type: type[ToolRunner] | None = runner_type
+
+    def __getattr__(self, name: str):
+        return ToolActionBuilder(runner_type=self._runner_type, tool_builder=self._tool_builder.__getattr__(name))
+
+    def __call__(self, *args, **kwargs) -> ShellAction:
+        # Return a ShellAction which will execute the actual command.
+        return ShellAction(
+            *self._tool_builder.prepare(*args, **kwargs, runner_type=self._runner_type).command,
+            show_stdout=False,
+            show_stderr=False,
+        )
 
 
 class VerifyTestStructure(JobBaseAction):

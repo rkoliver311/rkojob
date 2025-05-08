@@ -5,7 +5,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from rkojob import JobContext, JobException, ValueRef
-from rkojob.actions import ShellAction, VerifyTestStructure
+from rkojob.actions import ShellAction, ToolActionBuilder, VerifyTestStructure
 from rkojob.factories import JobContextFactory
 from rkojob.util import ShellException, ShellResult
 
@@ -13,8 +13,7 @@ from rkojob.util import ShellException, ShellResult
 class TestShellAction(TestCase):
     def make_context(self) -> JobContext:
         context = MagicMock(spec=JobContext)
-        context.status.start_item = MagicMock()
-        context.status.finish_item = MagicMock()
+        context.status.section = MagicMock()
         context.status.output = MagicMock()
         return context
 
@@ -29,8 +28,7 @@ class TestShellAction(TestCase):
         sut.action(context)
 
         expected_command = shlex.join(("echo", "ok"))
-        context.status.start_item.assert_called_once_with(f"Executing {expected_command}")
-        context.status.finish_item.assert_called_once_with()
+        context.status.section.assert_called_once_with(f"Executing {expected_command}")
         context.status.output.assert_called_once_with("ok", label="stdout")
         self.assertEqual(shell_result, sut.result.get())
 
@@ -46,7 +44,7 @@ class TestShellAction(TestCase):
         sut = ShellAction("explode", result=result_ref)
         sut.action(context)
 
-        context.status.finish_item.assert_called_once_with(error=exception)
+        context.status.error.assert_called_once_with(exception)
         context.status.output.assert_called_once_with("boom", label="stderr")
         self.assertEqual(result, result_ref.value)
 
@@ -64,7 +62,7 @@ class TestShellAction(TestCase):
             sut.action(context)
         self.assertEqual("boom", str(e.exception))
 
-        context.status.finish_item.assert_called_once_with("return_code=99")
+        context.status.error.assert_not_called()
         context.status.output.assert_called_once_with("boom", label="stderr")
         self.assertEqual(result, result_ref.value)
 
@@ -80,6 +78,17 @@ class TestShellAction(TestCase):
 
         context.status.output.assert_not_called()
         self.assertFalse(result_ref.has_value)
+
+
+class TestToolActionBuilder(TestCase):
+    @patch("rkojob.actions.Shell")
+    def test(self, mock_shell_type) -> None:
+        sut = ToolActionBuilder("tool").command.sub_command("-v", enable_feature=True, keyword_arg="value")
+        self.assertIsInstance(sut, ShellAction)
+        sut.action(MagicMock())
+        mock_shell_type().assert_called_once_with(
+            "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
+        )
 
 
 class TestVerifyTestStructure(TestCase):
