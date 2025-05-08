@@ -154,7 +154,7 @@ class VerifyTestStructure(JobBaseAction):
     def _skip(self, source_path: Path) -> bool:
         if source_path.name.startswith("."):
             return True
-        if source_path.name in ("__pycache__"):
+        if source_path.name in ("__pycache__", "__main__.py"):
             return True
         if source_path.name.endswith(".egg-info"):
             return True

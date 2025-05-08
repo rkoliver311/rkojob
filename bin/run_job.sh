@@ -56,7 +56,7 @@ else
 fi
 
 pushd "${WORKSPACE}" > /dev/null || exit 1
-PYTHONPATH=".:${PYTHONPATH}" python "${BIN_DIR}/run_job.py" "${JOB_ARGS[@]}"
+PYTHONPATH=".:${PYTHONPATH}" python -m rkojob "${JOB_ARGS[@]}"
 RC=$?
 popd > /dev/null || exit 1
 exit $RC
