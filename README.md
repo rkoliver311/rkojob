@@ -66,7 +66,7 @@ rkoJob is a set of tools for running structured jobs with a focus on CI/CD.
 
 Running the job:
 
-    $ rkojob --job-module build_and_test --job-name job --values dry_run=true
+    $ rkojob run --job-module build_and_test --job-name job --values dry_run=true
 
 ## Core Classes
 
