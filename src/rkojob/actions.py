@@ -13,6 +13,7 @@ from rkojob import (
     resolve_values,
     unassign_value,
 )
+from rkojob.coerce import as_path
 from rkojob.job import JobBaseAction
 from rkojob.util import (
     Shell,
@@ -20,7 +21,6 @@ from rkojob.util import (
     ShellResult,
     ToolBuilder,
     ToolRunner,
-    as_path,
 )
 from rkojob.values import (
     ValueRef,

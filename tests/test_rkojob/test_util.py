@@ -9,22 +9,9 @@ from rkojob.util import (
     ShellResult,
     ToolBuilder,
     ToolRunner,
-    as_path,
     to_camel,
     to_kebab,
 )
-
-
-class TestAsPath(TestCase):
-    def test_none(self) -> None:
-        self.assertIsNone(as_path(None))
-
-    def test_str(self) -> None:
-        self.assertEqual(Path("/foo/bar"), as_path("/foo/bar"))
-
-    def test_path(self) -> None:
-        value = Path("/foo/bar")
-        self.assertIs(value, as_path(value))
 
 
 class TestShellException(TestCase):

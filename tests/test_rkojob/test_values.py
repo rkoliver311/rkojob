@@ -1,6 +1,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from rkojob.coerce import as_bool, as_str
 from rkojob.values import (
     ComputedValue,
     EnvironmentVariable,
@@ -293,3 +294,8 @@ class TestEnvironmentVariable(TestCase):
         with self.assertRaises(ValueError) as e:
             _ = EnvironmentVariable("path_ref", str).get()
         self.assertEqual("Environment variable 'path_ref' is not set.", str(e.exception))
+
+    def test_repr(self) -> None:
+        self.assertEqual("environment_variable('key')", repr(EnvironmentVariable("key", str)))
+        self.assertEqual("environment_variable('key')", repr(EnvironmentVariable("key", as_str)))
+        self.assertEqual("environment_variable('key', as_bool)", repr(EnvironmentVariable("key", as_bool)))

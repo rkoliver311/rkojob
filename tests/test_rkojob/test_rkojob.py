@@ -3,17 +3,21 @@ from unittest.mock import MagicMock
 
 from rkojob import (
     JobBaseStatus,
+    JobCallable,
     JobContext,
     JobException,
+    JobResolvableValue,
     JobStatusCollector,
     ValueKey,
     assign_value,
+    context_value,
     lazy_format,
     resolve_map,
     resolve_value,
     resolve_values,
     unassign_value,
 )
+from rkojob.coerce import as_bool
 from rkojob.factories import JobContextFactory
 from rkojob.values import ValueRef, Values
 
@@ -228,6 +232,27 @@ class TestJobStatusCollector(TestCase):
         self.mock_2.finish_item.assert_called_with()
 
 
+class TestContextValue(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock(values=Values(key="value"))
+        sut: JobResolvableValue[str] = context_value("key")
+        self.assertEqual("value", resolve_value(sut, context=mock_context))
+
+    def test_coerce(self) -> None:
+        mock_context = MagicMock(values=Values(key="True"))
+        sut: JobResolvableValue[bool] = context_value("key", coercer=as_bool)
+        self.assertTrue(resolve_value(sut, context=mock_context))
+
+    def test_callable(self) -> None:
+        mock_context = MagicMock(values=Values(key="True"))
+        sut: JobCallable[bool] = context_value("key", coercer=as_bool)
+        self.assertTrue(sut(mock_context))
+
+    def test_repr(self) -> None:
+        self.assertEqual("context_value('key')", repr(context_value("key")))
+        self.assertEqual("context_value('key', as_bool)", repr(context_value("key", as_bool)))
+
+
 class TestResolveValue(TestCase):
     def test_callable(self) -> None:
         context: JobContext = JobContextFactory.create(values=dict(key="value"))
@@ -315,6 +340,13 @@ class TestLazyFormat(TestCase):
         ref2 = ValueRef("value2")
         sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
         self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=Values(ref1="value1"))))
+
+    def test_repr(self) -> None:
+        self.assertEqual("lazy_format('{ref1}, {ref2}')", repr(lazy_format("{ref1}, {ref2}")))
+        self.assertEqual(
+            "lazy_format('{ref1}, {ref2}', ref1='value1', ref2=ValueRef(value=value2))",
+            repr(lazy_format("{ref1}, {ref2}", ref1="value1", ref2=ValueRef("value2"))),
+        )
 
 
 class TestUnassignValue(TestCase):

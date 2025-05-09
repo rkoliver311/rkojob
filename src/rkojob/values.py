@@ -17,6 +17,8 @@ from typing import (
     runtime_checkable,
 )
 
+from rkojob.coerce import as_str
+
 T = TypeVar("T")
 U = TypeVar("U")
 T_co = TypeVar("T_co", covariant=True)
@@ -250,25 +252,30 @@ class LazyValue(ValueProvider[T]):
 
 
 class EnvironmentVariable(ValueProvider[T_co]):
-    def __init__(self, name: str, converter: Callable[[str], T_co]) -> None:
+    def __init__(self, name: str, coercer: Callable[[str], T_co]) -> None:
         """
         A type-safe ``ValueProvider`` that provides access to an environment variable.
 
         :param name: The name of the environment variable.
-        :param converter: The function used to convert the environment variable value (a ``str``) to the desired type.
+        :param coercer: The function used to coerce the environment variable value (a ``str``) to the desired type.
         """
         self._name: str = name
-        self._converter: Callable[[str], T_co] = converter
+        self._coercer: Callable[[str], T_co] = coercer
 
     def get(self) -> T_co:
         value: str | _NoValue = os.getenv(self._name, default=NoValue)
         if _is_value(value):
-            return self._converter(value)
+            return self._coercer(value)
         raise ValueError(f"Environment variable '{self._name}' is not set.")
 
     @property
     def has_value(self) -> bool:
         return _is_value(os.getenv(self._name, default=NoValue))
+
+    def __repr__(self) -> str:
+        if self._coercer not in (as_str, str):
+            return f"environment_variable('{self._name}', {self._coercer.__name__})"
+        return f"environment_variable('{self._name}')"
 
 
 class ValueKey(Generic[T]):
