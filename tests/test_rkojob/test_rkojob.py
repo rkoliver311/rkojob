@@ -354,8 +354,10 @@ class TestLazyFormat(TestCase):
 
     def test_with_context(self) -> None:
         ref2 = ValueRef("value2")
-        sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
-        self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=Values(ref1="value1"))))
+        sut = lazy_format("{ref.1}, {ref2}", ref2=ref2)
+        values: Values = Values()
+        values.set("ref.1", "value1")
+        self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=values)))
 
     def test_missing_key(self) -> None:
         ref2 = ValueRef("value2")

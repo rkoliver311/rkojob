@@ -272,6 +272,45 @@ class TestValues(TestCase):
         sut.unset("str_prop")
         self.assertEqual(set(), sut.keys())
 
+    def test_get_nested_key_and_dict(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual(("b", {"b": "c"}), sut._get_nested_key_and_dict("root.a.b"))
+
+        sut = Values(root="a")
+        self.assertEqual(("root", {"root": "a"}), sut._get_nested_key_and_dict("root"))
+
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual((None, None), sut._get_nested_key_and_dict("root.a.b.c"))
+
+    def test_get_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual({"a": {"b": "c"}}, sut.get("root"))
+        self.assertEqual({"b": "c"}, sut.get("root.a"))
+        self.assertEqual("c", sut.get("root.a.b"))
+
+    def test_has_value_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertTrue(sut.has_value("root"))
+        self.assertTrue(sut.has_value("root.a"))
+        self.assertTrue(sut.has_value("root.a.b"))
+        self.assertFalse(sut.has_value("root.a.z"))
+
+    def test_set_nested(self) -> None:
+        sut = Values(root={"a": "b"})
+        sut.set("root.a", {"b": "c"})
+        self.assertEqual({"root": {"a": {"b": "c"}}}, sut._values)
+
+        sut.set("root.a.b", "d")
+        self.assertEqual({"root": {"a": {"b": "d"}}}, sut._values)
+
+        sut.set("root.a.x.y", "z")
+        self.assertEqual({"root": {"a": {"b": "d", "x": {"y": "z"}}}}, sut._values)
+
+    def test_unset_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        sut.unset("root.a")
+        self.assertEqual({"root": {}}, sut._values)
+
 
 class TestEnvironmentVariable(TestCase):
     @patch("rkojob.values.os.getenv")

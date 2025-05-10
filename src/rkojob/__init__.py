@@ -440,7 +440,7 @@ def resolve_map(
     return {key: resolve_value(value, context=context, raise_no_value=raise_no_value) for key, value in values.items()}
 
 
-FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([^{}!:]+)(?:![rs])?(?::[^{}]+)?}")
+FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([a-zA-Z_][\w\.]*)(?:![rs])?(?::[^{}]+)?}")
 
 
 class lazy_format:

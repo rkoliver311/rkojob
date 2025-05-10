@@ -61,7 +61,11 @@ class TestCli(TestCase):
 
     def test_load_values_from_file_success(self) -> None:
         path = self._write_yaml({"x": 1, "y": "two"})
-        self.assertEqual(self.sut.load_values_from_file(str(path)), {"x": 1, "y": "two"})
+        self.assertEqual({"x": 1, "y": "two"}, self.sut.load_values_from_file(str(path)))
+
+    def test_load_values_from_file_with_nesting(self) -> None:
+        path = self._write_yaml({"x": 1, "y": {"z": "two"}})
+        self.assertEqual({"x": 1, "y": {"z": "two"}}, self.sut.load_values_from_file(str(path)))
 
     def test_load_values_from_file_root_not_mapping(self) -> None:
         path = self._write_yaml(["not", "a", "dict"])

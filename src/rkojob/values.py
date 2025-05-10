@@ -351,9 +351,12 @@ class Values:
         """
         if isinstance(key, ValueKey):
             key = key.name
-        if key not in self._values:
+        nested_key: str | None
+        nested_dict: dict[str, Any] | None
+        nested_key, nested_dict = self._get_nested_key_and_dict(key)
+        if nested_key is None or nested_dict is None:
             raise NoValueError(f"{repr(self)} has no value associated with key '{key}'")
-        return self._values[key]
+        return nested_dict[nested_key]
 
     def has_value(self, key: ValueKey[T] | str) -> bool:
         """
@@ -361,7 +364,10 @@ class Values:
         """
         if isinstance(key, ValueKey):
             key = key.name
-        return key in self._values
+        nested_key: str | None
+        nested_dict: dict[str, Any] | None
+        nested_key, nested_dict = self._get_nested_key_and_dict(key)
+        return nested_key is not None and nested_dict is not None
 
     def set(self, key: ValueKey[T] | str, value: ValueOrRef[T]) -> None:
         """
@@ -374,14 +380,18 @@ class Values:
             key = key.name
         if isinstance(value, ValueProvider):
             if value.has_value:
-                self._values[key] = value.get()
+                value = value.get()
             else:
-                self.unset(key)
-        elif not _is_value(value):
-            # Not typical but not impossible
+                value = NoValue  # type: ignore[assignment]
+
+        if not _is_value(value):
             self.unset(key)
         else:
-            self._values[key] = value
+            nested_key: str | None
+            nested_dict: dict[str, Any] | None
+            nested_key, nested_dict = self._get_nested_key_and_dict(key, create_missing=True)
+            assert nested_key and nested_dict
+            nested_dict[nested_key] = value
 
     def unset(self, key: ValueKey[T] | str) -> None:
         """
@@ -391,7 +401,11 @@ class Values:
         """
         if isinstance(key, ValueKey):
             key = key.name
-        self._values.pop(key)
+        nested_key: str | None
+        nested_dict: dict[str, Any] | None
+        nested_key, nested_dict = self._get_nested_key_and_dict(key, create_missing=True)
+        if nested_key is not None and nested_dict is not None:
+            nested_dict.pop(nested_key)
 
     def get_or_else(self, key: ValueKey[T] | str, default: T | None = None) -> T | None:
         """
@@ -412,6 +426,31 @@ class Values:
         if isinstance(key, str):
             key = ValueKey[T](key)
         return ValuesRef(self, key)
+
+    def _get_nested_key_and_dict(
+        self, key: str, create_missing: bool = False
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        # Traverse the nested dictionary structure and return the final key and the
+        # parent dict that contains it.
+        #
+        # Returns (None, None) if the path cannot be resolved and `create_missing` is False.
+        current: dict[str, Any] = self._values
+        parts: list[str] = key.split(".")
+
+        nested_key: str = parts[-1]
+        nested_dict: dict[str, Any] = current
+
+        for part in parts:
+            if not isinstance(current, dict):
+                return None, None
+            if part not in current:
+                if not create_missing:
+                    return None, None
+                else:
+                    current[part] = {}
+            nested_dict = current
+            current = current[part]
+        return nested_key, nested_dict
 
     def __repr__(self) -> str:
         return self.__class__.__name__
