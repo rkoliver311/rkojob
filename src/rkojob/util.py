@@ -5,19 +5,7 @@ import re
 import subprocess
 import sys
 from os import PathLike
-from pathlib import Path
 from typing import IO, Any, Iterable
-
-
-def as_path(value: str | PathLike | None) -> Path | None:
-    """
-    Returns a `Path` instance for the provided value.
-    :param value: The value to return as a `Path` instance. If `value` is a `Path`, return it unchanged.
-    :return: A `Path` instance or `None` if `value` is `None`.
-    """
-    if value is None or isinstance(value, Path):
-        return value
-    return Path(os.fspath(value))
 
 
 class ShellResult:

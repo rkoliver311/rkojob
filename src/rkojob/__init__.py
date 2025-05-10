@@ -6,8 +6,10 @@ from contextlib import contextmanager
 from enum import Enum, auto
 from typing import (
     Any,
+    Callable,
     Final,
     Generator,
+    Generic,
     Protocol,
     Tuple,
     TypeAlias,
@@ -280,13 +282,6 @@ class JobContext(Protocol):
     """
 
 
-context_value: type[ValueKey] = ValueKey
-"""Convenience alias for a value provided by the context by name."""
-
-environment_variable: type[EnvironmentVariable] = EnvironmentVariable
-"""Convenience alias for a value provided by an environment variable."""
-
-
 class JobScopeType(Protocol):
     """
     Classifies a `JobScope`, typically implemented as an ``Enum``.
@@ -326,13 +321,17 @@ T = TypeVar("T")
 @runtime_checkable
 class JobCallable(Protocol[R_co]):
     """
+    A callable object that takes a `JobContext` parameter and returns a value.
+    """
+
+    def __call__(self, context: JobContext) -> R_co: ...
+
+    """
     A callable object that takes a `JobContext` parameter.
 
     :param context: The current job context.
     :returns: A value of type *R_co*.
     """
-
-    def __call__(self, context: JobContext) -> R_co: ...
 
 
 # Convenience functions for reading values from provider-like objects.
@@ -406,31 +405,58 @@ def resolve_map(
     return {key: resolve_value(value, context=context) for key, value in values.items()}
 
 
-FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([^{}!:]+)(?:![rs])?(?::[^{}]+)?\}")
+FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([^{}!:]+)(?:![rs])?(?::[^{}]+)?}")
 
 
-def lazy_format(value: str, **kwargs) -> JobResolvableValue[str]:
-    """
-    Lazily format a string using the provided `JobResolvableValue` instances and
-    values from the *context* passed into `resolve_value`.
+class lazy_format:
+    def __init__(self, format: str, **kwargs) -> None:
+        """
+        Lazily format a string using the provided `JobResolvableValue` instances and
+        values from the *context* passed into `resolve_value`.
 
-    :param value: The format string contain `{placeholder}` values.
-    :param kwargs: `JobResolvableValue` to use to replace placeholders.
-    :returns: A `JobResolvableValue[str]` instance that can be resolved using `resolve_value`.
-    """
+        :param value: The format string contain `{placeholder}` values.
+        :param kwargs: `JobResolvableValue` to use to replace placeholders.
+        """
+        self.format: str = format
+        self.data: dict[str, Any] = kwargs
 
-    def _wrapped(context: JobContext) -> str:
+    def __call__(self, context: JobContext) -> str:
         # Provided values
-        values: dict[str, Any] = {**kwargs}
+        values: dict[str, Any] = {**self.data}
         # Referenced values
-        template_keys: list[str] = FORMAT_MAP_KEY_PATTERN.findall(value)
+        template_keys: list[str] = FORMAT_MAP_KEY_PATTERN.findall(self.format)
         # Missing values
         missing_keys: set[str] = template_keys - values.keys()
         # Add missing values from the context
         values.update({key: ValueKey(key) for key in missing_keys})
-        return value.format_map(resolve_map(values, context=context))
+        return self.format.format_map(resolve_map(values, context=context))
 
-    return _wrapped
+    def __repr__(self) -> str:
+        data_str: str = ""
+        if self.data:
+            data_str = ", " + ", ".join(f"{key}={repr(value)}" for key, value in self.data.items())
+        return f"lazy_format('{self.format}'{data_str})"
+
+
+class context_value(Generic[R_co]):
+    def __init__(self, key: str, coercer: Callable[[Any], R_co] | None = None) -> None:
+        self._key: str = key
+        self._coercer: Callable[[Any], R_co] | None = coercer
+
+    def __call__(self, context: JobContext) -> R_co:
+        value: Any = context.values.get(self._key)
+        if self._coercer:
+            value = self._coercer(value)
+        return cast(R_co, value)
+
+    def __repr__(self) -> str:
+        if self._coercer:
+            return f"context_value('{self._key}', {self._coercer.__name__})"
+        return f"context_value('{self._key}')"
+
+
+environment_variable: type[EnvironmentVariable] = EnvironmentVariable
+"""Convenience alias for a value provided by an environment variable."""
 
 
 # Convenience functions for assigning values to consumer-like instances.

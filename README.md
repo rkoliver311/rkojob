@@ -22,7 +22,7 @@ rkoJob is a set of tools for running structured jobs with a focus on CI/CD.
     
     from rkojob import context_value
     from rkojob.actions import ShellAction, ToolActionBuilder
-    from rkojob.factories import JobContextFactory, JobRunnerFactory
+    from rkojob.coerce import as_bool
     from rkojob.job import JobBuilder
     from rkojob.values import ComputedValue
     
@@ -30,9 +30,11 @@ rkoJob is a set of tools for running structured jobs with a focus on CI/CD.
     pip = ToolActionBuilder("pip")
     cat = ToolActionBuilder("cat")
     
+    
     # Helper function to check whether a file exists
     def path_exists(path: str) -> ComputedValue[bool]: return ComputedValue(lambda: Path(path).exists())
-        
+    
+    
     with JobBuilder("build-test-deploy") as job_builder:
         with job_builder.stage("setup") as setup_stage:
             with setup_stage.step("install-dependencies") as install_dependencies:
@@ -57,14 +59,14 @@ rkoJob is a set of tools for running structured jobs with a focus on CI/CD.
         with job_builder.stage("deploy") as deploy_stage:
             with deploy_stage.step("deploy") as deploy:
                 deploy.action = ShellAction("scripts/deploy.sh")
-                deploy.skip_if = context_value("dry_run")
+                deploy.skip_if = context_value("dry_run", as_bool)
     
     job = job_builder.build()
 
 
 Running the job:
 
-    $ rkojob --job-module build_and_test --job-name job --values dry_run=true
+    $ rkojob run --job build_and_test.job --values dry_run=true
 
 ## Core Classes
 
