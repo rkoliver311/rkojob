@@ -20,20 +20,17 @@ class TestCli(TestCase):
     # parse_args                                                             #
     # --------------------------------------------------------------------- #
     def test_parse_args_defaults(self) -> None:
-        args = self.sut.parse_args(["run", "-m", "pkg.mod"])
+        args = self.sut.parse_args(["run", "-j", "pkg.mod.job"])
         self.assertEqual(args.command, "run")
-        self.assertEqual(args.job_module, "pkg.mod")
-        self.assertEqual(args.job_name, "job")  # default
+        self.assertEqual(args.job, "pkg.mod.job")
         self.assertEqual(args.values, [])  # default
         self.assertIsNone(args.values_from)
 
     def test_parse_args_all_options(self) -> None:
         argv = [
             "run",
-            "--job-module",
-            "some.module",
-            "--job-name",
-            "my_job",
+            "--job",
+            "some.module.my_job",
             "-v",
             "a=1",
             "-v",
@@ -43,9 +40,15 @@ class TestCli(TestCase):
         ]
         args = self.sut.parse_args(argv)
         self.assertEqual(
-            (args.command, args.job_module, args.job_name, args.values, args.values_from),
-            ("run", "some.module", "my_job", ["a=1", "b=two"], "vals.yml"),
+            (args.command, args.job, args.values, args.values_from),
+            ("run", "some.module.my_job", ["a=1", "b=two"], "vals.yml"),
         )
+
+    def test_split_module_and_job(self) -> None:
+        self.assertEqual(("pkg.mod", "job"), self.sut._split_module_and_job("pkg.mod.job"))
+        with self.assertRaises(ValueError) as e:
+            _ = self.sut._split_module_and_job("job")
+        self.assertEqual("Invalid job name: 'job' (expecting <module_name>.<job_name>)", str(e.exception))
 
     def test_error_and_success(self) -> None:
         self.assertEqual(self.sut.error("boom"), 1)

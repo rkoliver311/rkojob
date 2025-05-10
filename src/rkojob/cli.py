@@ -15,8 +15,7 @@ class Cli:
 
     RUN_COMMAND: Final[str] = "run"
 
-    JOB_NAME_ARGS: Final[tuple[str, str]] = ("--job-name", "-j")
-    JOB_MODULE_ARGS: Final[tuple[str, str]] = ("--job-module", "-m")
+    JOB_ARGS: Final[tuple[str, str]] = ("--job", "-j")
 
     def main(self, argv: list[str]) -> int:  # pragma: no cover
         try:
@@ -41,12 +40,7 @@ class Cli:
 
         # run
         run_parser = subparsers.add_parser(self.RUN_COMMAND, help="Execute a job definition.")
-        run_parser.add_argument(
-            *self.JOB_MODULE_ARGS, type=str, required=True, help="The module to import the job definition from."
-        )
-        run_parser.add_argument(
-            *self.JOB_NAME_ARGS, type=str, default="job", help="The name of the job definition to run from job_module."
-        )
+        run_parser.add_argument(*self.JOB_ARGS, type=str, required=True, help="The name of the job definition to run.")
         run_parser.add_argument("--value", "-v", action="append", dest="values", default=[])
         run_parser.add_argument(
             "--values-from", type=str, help="Path to a file containing key=value pairs to add to the context's values."
@@ -59,7 +53,7 @@ class Cli:
         return parser.parse_args(argv)
 
     def run_job(self, args: Namespace) -> int:  # pragma: no cover
-        job: Job = self.get_job(args.job_module, args.job_name)
+        job: Job = self.get_job(args.job)
         values: dict[str, Any] = self.read_values(args)
 
         try:
@@ -100,12 +94,20 @@ class Cli:
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(f"Job module not found: {name}") from e
 
-    def get_job(self, module_name: str, job_name: str) -> Job:  # pragma: no cover
+    def get_job(self, job_name: str) -> Job:  # pragma: no cover
+        module_name: str
+        module_name, job_name = self._split_module_and_job(job_name)
         job_module: ModuleType = self.get_job_module(module_name)
         job: Job = getattr(job_module, job_name)
         if not isinstance(job, Job):
             raise TypeError(f"{module_name}.{job_name} is not a Job instance.")
         return job
+
+    def _split_module_and_job(self, job_name: str) -> tuple[str, str]:
+        module_and_job: list[str] = job_name.rsplit(".", maxsplit=1)
+        if len(module_and_job) != 2:
+            raise ValueError(f"Invalid job name: '{job_name}' (expecting <module_name>.<job_name>)")
+        return module_and_job[0], module_and_job[1]
 
 
 def main() -> int:  # pragma: no cover
