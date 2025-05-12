@@ -11,10 +11,16 @@ from rkojob import (
     ValueKey,
     assign_value,
     context_value,
+    job_always,
+    job_failing,
+    job_never,
+    job_succeeding,
     lazy_format,
     resolve_map,
     resolve_value,
     resolve_values,
+    scope_failing,
+    scope_succeeding,
     unassign_value,
 )
 from rkojob.coerce import as_bool
@@ -395,3 +401,65 @@ class TestUnassignValue(TestCase):
         with self.assertRaises(JobException) as e:
             unassign_value("foo")  # type: ignore[arg-type]
         self.assertEqual("Unable to unassign foo", str(e.exception))
+
+
+class TestJobScopeCondition(TestCase):
+    def test_job_always(self) -> None:
+        sut = job_always
+        self.assertEqual("Always", repr(sut))
+        self.assertEqual((True, "Always"), sut(MagicMock()))
+
+    def test_job_never(self) -> None:
+        sut = job_never
+        self.assertEqual("Never", repr(sut))
+        self.assertEqual((False, "Never"), sut(MagicMock()))
+
+    def test_job_failing(self) -> None:
+        sut = job_failing
+        self.assertEqual("Job has failures.", repr(sut))
+        self.assertEqual((True, "Job has failures."), sut(MagicMock(get_errors=MagicMock(return_value=[Exception()]))))
+        self.assertEqual((False, "Job has failures."), sut(MagicMock(get_errors=MagicMock(return_value=[]))))
+
+    def test_job_succeeding(self) -> None:
+        sut = job_succeeding
+        self.assertEqual("Job is succeeding.", repr(sut))
+        self.assertEqual(
+            (False, "Job is succeeding."), sut(MagicMock(get_errors=MagicMock(return_value=[Exception()])))
+        )
+        self.assertEqual((True, "Job is succeeding."), sut(MagicMock(get_errors=MagicMock(return_value=[]))))
+
+    def test_scope_failing(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_scope.__str__.return_value = "Scope"  # type: ignore[attr-defined]
+
+        sut = scope_failing(mock_scope)
+        self.assertEqual("Scope has failures.", repr(sut))
+
+        mock_context.get_errors.return_value = [Exception()]
+        self.assertEqual((True, "Scope has failures."), sut(mock_context))
+        mock_context.get_errors.assert_called_with(mock_scope)
+
+        mock_context.reset_mock()
+        mock_context.get_errors.return_value = []
+
+        self.assertEqual((False, "Scope has failures."), sut(mock_context))
+        mock_context.get_errors.assert_called_with(mock_scope)
+
+    def test_scope_succeeding(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_scope.__str__.return_value = "Scope"  # type: ignore[attr-defined]
+
+        sut = scope_succeeding(mock_scope)
+        self.assertEqual("Scope is succeeding.", repr(sut))
+
+        mock_context.get_errors.return_value = [Exception()]
+        self.assertEqual((False, "Scope is succeeding."), sut(mock_context))
+        mock_context.get_errors.assert_called_with(mock_scope)
+
+        mock_context.reset_mock()
+        mock_context.get_errors.return_value = []
+
+        self.assertEqual((True, "Scope is succeeding."), sut(mock_context))
+        mock_context.get_errors.assert_called_with(mock_scope)
