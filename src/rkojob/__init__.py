@@ -7,7 +7,6 @@ from enum import Enum, auto
 from typing import (
     Any,
     Callable,
-    Final,
     Generator,
     Generic,
     Protocol,
@@ -21,7 +20,6 @@ from typing import (
 
 from rkojob.delegates import delegate
 from rkojob.values import (
-    ComputedValue,
     EnvironmentVariable,
     NoValue,
     NoValueError,
@@ -565,39 +563,45 @@ JobConditionalValueType: TypeAlias = bool | tuple[bool, str]
 JobConditionalType: TypeAlias = JobResolvableValue[JobConditionalValueType]
 """TypeAlias for the type used by scope conditions `run_if` and `skip_if`."""
 
-job_always: Final[JobConditionalType] = ComputedValue[JobConditionalValueType](lambda: (True, "Always"))
+
+class _JobScopeCondition:
+    """Class for built-in scope conditions."""
+
+    def __init__(self, func: JobCallable[bool], reason: str) -> None:
+        self._func: JobCallable[bool] = func
+        self._reason: str = reason
+
+    def __call__(self, context: JobContext) -> JobConditionalValueType:
+        return self._func(context), self._reason
+
+    def __repr__(self) -> str:
+        return self._reason
+
+
+job_always = _JobScopeCondition(lambda _: True, "Always")
 """Scope condition that always returns ``True``."""
 
-job_never: Final[ValueProvider[JobConditionalValueType]] = ComputedValue(lambda: (False, "Never"))
+
+job_never = _JobScopeCondition(lambda _: False, "Never")
 """Scope condition that always returns ``False``."""
 
 
-def job_failing(context: JobContext) -> tuple[bool, str]:
-    """Scope condition that returns ``True`` if *any* errors have been recorded."""
-    return bool(context.get_exceptions()), "Job has failures."
+job_failing = _JobScopeCondition(lambda context: bool(context.get_exceptions()), "Job has failures.")
+"""Scope condition that returns ``True`` if *any* errors have been recorded."""
 
 
-def job_succeeding(context: JobContext) -> tuple[bool, str]:
-    """Scope condition that returns ``True`` if *no* errors have been recorded."""
-    return bool(not context.get_exceptions()), "Job is succeeding."
+job_succeeding = _JobScopeCondition(lambda context: bool(not context.get_exceptions()), "Job is succeeding.")
+"""Scope condition that returns ``True`` if *no* errors have been recorded."""
 
 
-def scope_failing(scope: JobScope) -> JobConditionalType:
+def scope_failing(scope: JobScope) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if errors have been recorded for the provided `scope`."""
-
-    def _wrapped(context: JobContext) -> tuple[bool, str]:
-        return bool(context.get_exceptions(scope)), f"{scope} has failures."
-
-    return _wrapped
+    return _JobScopeCondition(lambda context: bool(context.get_exceptions(scope)), f"{scope} has failures.")
 
 
-def scope_succeeding(scope: JobScope) -> JobConditionalType:
+def scope_succeeding(scope: JobScope) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if *no* errors have been recorded for the provided `scope`."""
-
-    def _wrapped(context: JobContext) -> tuple[bool, str]:
-        return bool(not context.get_exceptions(scope)), f"{scope} is succeeding."
-
-    return _wrapped
+    return _JobScopeCondition(lambda context: bool(not context.get_exceptions(scope)), f"{scope} is succeeding.")
 
 
 @runtime_checkable

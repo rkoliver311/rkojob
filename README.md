@@ -4,6 +4,8 @@
 
 🐣 This project is in the early stages of development. Contributions, feedback, and bug reports are welcome. 🌱
 
+---
+
 ## Quick Start
 
 ### Installation
@@ -16,6 +18,8 @@ cd rkojob
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
+
+---
 
 ### Example
 
@@ -32,90 +36,146 @@ from rkojob.coerce import as_bool
 from rkojob.job import JobBuilder
 from rkojob.values import ComputedValue
 
-# Dynamic bindings for pip and cat
 pip = ToolActionBuilder("pip")
 cat = ToolActionBuilder("cat")
 
-# Helper to determine whether a path exists
 def path_exists(path: str) -> ComputedValue[bool]:
     return ComputedValue(lambda: Path(path).exists())
 
 with JobBuilder("build-test-deploy") as job_builder:
-    with job_builder.stage("setup") as setup_stage:
-        with setup_stage.step("install-dependencies") as install_dependencies:
-            install_dependencies.action = pip.install(requirement="requirements.txt")
+    with job_builder.stage("setup") as setup:
+        with setup.step("install-dependencies") as step:
+            step.action = pip.install(requirement="requirements.txt")
 
-    with job_builder.stage("build") as build_stage:
-        with build_stage.step("build") as build:
-            build.action = ShellAction("scripts/build.sh")
+    with job_builder.stage("build") as build:
+        with build.step("build") as step:
+            step.action = ShellAction("scripts/build.sh")
 
-        with build_stage.step("log-errors") as log_errors:
-            log_errors.action = cat("build/errors.log")
-            log_errors.run_if = path_exists("build/errors.log")
+        with build.step("log-errors") as step:
+            step.action = cat("build/errors.log")
+            step.run_if = path_exists("build/errors.log")
 
-    with job_builder.stage("test") as test_stage:
-        with test_stage.step("test") as test:
-            test.action = ShellAction("scripts/test.sh")
+    with job_builder.stage("test") as test:
+        with test.step("test") as step:
+            step.action = ShellAction("scripts/test.sh")
 
-        with test_stage.step("log-errors") as log_errors:
-            log_errors.action = cat("test/errors.log")
-            log_errors.run_if = path_exists("test/errors.log")
+        with test.step("log-errors") as step:
+            step.action = cat("test/errors.log")
+            step.run_if = path_exists("test/errors.log")
 
-    with job_builder.stage("deploy") as deploy_stage:
-        with deploy_stage.step("deploy") as deploy:
-            deploy.action = ShellAction("scripts/deploy.sh")
-            deploy.skip_if = context_value("dry_run", as_bool)
+    with job_builder.stage("deploy") as deploy:
+        with deploy.step("deploy") as step:
+            step.action = ShellAction("scripts/deploy.sh")
+            step.skip_if = context_value("dry_run", as_bool)
 
 job = job_builder.build()
 ```
 
-To run the job:
+Run the job:
 
 ```bash
 rkojob run --job build_and_test.job --values dry_run=true
 ```
 
-Values can also be loaded from a YAML file using the `--values-from` option:
+You can also load values from a YAML file using the `--values-from` option:
 
 ```yaml
-dry_run: True
+dry_run: true
 docker:
   tag: release
   registry: gcr.io
 ```
 
-Nested values can be accessed using dot delimited keys:
+Nested values can be accessed using dot-delimited keys:
 
 ```python
 docker_tag = context_value("docker.tag")
 docker_registry = context_value("docker.registry")
 ```
 
+---
+
 ## Core Concepts
 
 ### `JobContext`
 
-Provides contextual data during execution. Tracks the current state of the job and facilitates communication between actions and infrastructure (e.g., status reporting, values).
+Provides contextual data during execution. It tracks the current job state and allows communication between steps and infrastructure (e.g., status reporting, shared values).
+
+---
 
 ### `JobRunner`
 
-The orchestrator that executes a `Job` instance. Responsible for walking the job structure and evaluating `run_if` / `skip_if` conditions.
+Orchestrates execution of a `Job` instance by walking its structure and evaluating conditions like `run_if` and `skip_if`.
+
+---
 
 ### `Job`, `JobStage`, and `JobStep`
 
 Concrete implementations of the `JobScope` protocol:
 
-- **Job**: The top-level container for all stages.
-- **JobStage**: A logical grouping of steps, typically representing a phase like "build" or "test".
-- **JobStep**: The atomic unit of execution. Each step wraps an `action` and its execution logic.
+- **`Job`**: The top-level container for all stages.
+- **`JobStage`**: A logical grouping of steps, typically representing phases like "build" or "test".
+- **`JobStep`**: The atomic unit of execution. Each step wraps an `action` and associated logic.
+
+---
 
 ### Actions
 
-Actions are the core units of work and must implement the `JobCallable[None]` protocol. Built-in actions include:
+Actions implement the `JobCallable[None]` protocol and define what actually happens when a step runs.
 
-- `ShellAction`: Run shell commands.
-- `ToolActionBuilder`: Dynamically create parameterized shell actions (e.g., for common CLI tools).
-- Custom actions can be defined to encapsulate reusable logic.
+Built-in actions include:
+
+- `ShellAction`: Runs a shell command.
+- `ToolActionBuilder`: Dynamically creates parameterized shell actions for common CLI tools.
+- You can also define your own custom actions.
+
+---
+
+### Conditional Scopes
+
+Any scope conforming to `JobConditionalScope` (e.g., `JobStep`) can be conditionally run or skipped by setting `run_if` or `skip_if`. These fields accept a flexible `JobConditionalType`, including:
+
+```python
+# Static boolean
+step.run_if = False
+
+# Boolean with explanation
+step.skip_if = True, "Step disabled"
+
+# Context-aware callable
+step.run_if = lambda context: len(context.get_exceptions()) != 0
+```
+
+Built-in condition helpers:
+
+- `job_always`: Always returns `True`
+- `job_never`: Always returns `False`
+- `job_failing`: Returns `True` if the job has any recorded errors
+- `job_succeeding`: Returns `True` if the job has no errors
+- `scope_failing(scope)`: True if the given scope has any errors
+- `scope_succeeding(scope)`: True if the given scope has no errors
+
+**Example:**
+
+```python
+with JobBuilder("job") as job_builder:
+    with job_builder.stage("stage") as stage:
+        with stage.step("step") as step:
+            step.run_if = scope_failing(stage)
+```
+
+#### `run_if` vs `skip_if`
+
+Both `run_if` and `skip_if` control whether a scope will be executed, but they serve slightly different purposes:
+
+`run_if` determines if a scope is **eligible to run at all**.
+
+`skip_if` determines if a scope that *could* run should be **explicitly skipped**.
+
+If both are set:
+
+- The scope must pass `run_if`
+- Then, it must not be blocked by `skip_if`
 
 ---
 
