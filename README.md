@@ -143,7 +143,7 @@ step.run_if = False
 step.skip_if = True, "Step disabled"
 
 # Context-aware callable
-step.run_if = lambda context: len(context.get_exceptions()) != 0
+step.run_if = lambda context: len(context.get_errors()) != 0
 ```
 
 Built-in condition helpers:

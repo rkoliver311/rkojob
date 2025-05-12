@@ -609,9 +609,9 @@ class JobContextImpl:
             raise JobException(f"No state found for scope '{scope.name}'")
         return state
 
-    def exception(self, error: str | Exception) -> Exception:
+    def error(self, error: str | Exception) -> Exception:
         """
-        Record *exception* in the current scope.
+        Record *error* in the current scope.
 
         :param error: And exception or error message.
         :returns: The exception instance or the error message as an exception.
@@ -621,7 +621,7 @@ class JobContextImpl:
         self.status.error(error)
         return error
 
-    def get_exceptions(self, scope: JobScope | None = None) -> list[Exception]:
+    def get_errors(self, scope: JobScope | None = None) -> list[Exception]:
         """
         Return exceptions recorded for *scope* or for *all* scopes if omitted.
 

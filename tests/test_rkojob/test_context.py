@@ -563,12 +563,12 @@ class TestJobContextImpl(TestCase):
             self.assertEqual((mock_scope_1,), sut.scopes)
         self.assertEqual(tuple(), sut.scopes)
 
-    def test_exception(self):
-        self.assertEqual("JobException('Foo')", repr(JobContextImpl().exception("Foo")))
+    def test_error(self):
+        self.assertEqual("JobException('Foo')", repr(JobContextImpl().error("Foo")))
         bar_exception = Exception("Bar")
-        self.assertEqual(bar_exception, JobContextImpl().exception(bar_exception))
+        self.assertEqual(bar_exception, JobContextImpl().error(bar_exception))
 
-    def test_get_exceptions(self):
+    def test_get_errors(self):
         sut = JobContextImpl()
 
         foo_error = Exception("Foo")
@@ -592,9 +592,9 @@ class TestJobContextImpl(TestCase):
         sut.status.error(boz_error)
         sut.status.finish_scope(mock_scope)
 
-        self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_exceptions())
-        self.assertEqual([baz_error, boz_error, buz_error], sut.get_exceptions(mock_scope))
-        self.assertEqual([buz_error], sut.get_exceptions(mock_scope_2))
+        self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_errors())
+        self.assertEqual([baz_error, boz_error, buz_error], sut.get_errors(mock_scope))
+        self.assertEqual([buz_error], sut.get_errors(mock_scope_2))
 
     def test_values(self) -> None:
         sut = JobContextImpl()

@@ -259,16 +259,16 @@ class JobContext(Protocol):
     @property
     def scopes(self) -> Tuple[JobScope, ...]: ...
 
-    def exception(self, error: str | Exception) -> Exception: ...
+    def error(self, error: str | Exception) -> Exception: ...
 
     """
-    Record *exception* in the current scope.
+    Record *error* in the current scope.
 
     :param error: And exception or error message.
     :returns: The exception instance or the error message as an exception.
     """
 
-    def get_exceptions(self, scope: JobScope | None = None) -> list[Exception]: ...
+    def get_errors(self, scope: JobScope | None = None) -> list[Exception]: ...
     @property
     def values(self) -> Values: ...
     @property
@@ -586,22 +586,22 @@ job_never = _JobScopeCondition(lambda _: False, "Never")
 """Scope condition that always returns ``False``."""
 
 
-job_failing = _JobScopeCondition(lambda context: bool(context.get_exceptions()), "Job has failures.")
+job_failing = _JobScopeCondition(lambda context: bool(context.get_errors()), "Job has failures.")
 """Scope condition that returns ``True`` if *any* errors have been recorded."""
 
 
-job_succeeding = _JobScopeCondition(lambda context: bool(not context.get_exceptions()), "Job is succeeding.")
+job_succeeding = _JobScopeCondition(lambda context: bool(not context.get_errors()), "Job is succeeding.")
 """Scope condition that returns ``True`` if *no* errors have been recorded."""
 
 
 def scope_failing(scope: JobScope) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if errors have been recorded for the provided `scope`."""
-    return _JobScopeCondition(lambda context: bool(context.get_exceptions(scope)), f"{scope} has failures.")
+    return _JobScopeCondition(lambda context: bool(context.get_errors(scope)), f"{scope} has failures.")
 
 
 def scope_succeeding(scope: JobScope) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if *no* errors have been recorded for the provided `scope`."""
-    return _JobScopeCondition(lambda context: bool(not context.get_exceptions(scope)), f"{scope} is succeeding.")
+    return _JobScopeCondition(lambda context: bool(not context.get_errors(scope)), f"{scope} is succeeding.")
 
 
 @runtime_checkable

@@ -417,18 +417,16 @@ class TestJobScopeCondition(TestCase):
     def test_job_failing(self) -> None:
         sut = job_failing
         self.assertEqual("Job has failures.", repr(sut))
-        self.assertEqual(
-            (True, "Job has failures."), sut(MagicMock(get_exceptions=MagicMock(return_value=[Exception()])))
-        )
-        self.assertEqual((False, "Job has failures."), sut(MagicMock(get_exceptions=MagicMock(return_value=[]))))
+        self.assertEqual((True, "Job has failures."), sut(MagicMock(get_errors=MagicMock(return_value=[Exception()]))))
+        self.assertEqual((False, "Job has failures."), sut(MagicMock(get_errors=MagicMock(return_value=[]))))
 
     def test_job_succeeding(self) -> None:
         sut = job_succeeding
         self.assertEqual("Job is succeeding.", repr(sut))
         self.assertEqual(
-            (False, "Job is succeeding."), sut(MagicMock(get_exceptions=MagicMock(return_value=[Exception()])))
+            (False, "Job is succeeding."), sut(MagicMock(get_errors=MagicMock(return_value=[Exception()])))
         )
-        self.assertEqual((True, "Job is succeeding."), sut(MagicMock(get_exceptions=MagicMock(return_value=[]))))
+        self.assertEqual((True, "Job is succeeding."), sut(MagicMock(get_errors=MagicMock(return_value=[]))))
 
     def test_scope_failing(self) -> None:
         mock_context = MagicMock()
@@ -438,15 +436,15 @@ class TestJobScopeCondition(TestCase):
         sut = scope_failing(mock_scope)
         self.assertEqual("Scope has failures.", repr(sut))
 
-        mock_context.get_exceptions.return_value = [Exception()]
+        mock_context.get_errors.return_value = [Exception()]
         self.assertEqual((True, "Scope has failures."), sut(mock_context))
-        mock_context.get_exceptions.assert_called_with(mock_scope)
+        mock_context.get_errors.assert_called_with(mock_scope)
 
         mock_context.reset_mock()
-        mock_context.get_exceptions.return_value = []
+        mock_context.get_errors.return_value = []
 
         self.assertEqual((False, "Scope has failures."), sut(mock_context))
-        mock_context.get_exceptions.assert_called_with(mock_scope)
+        mock_context.get_errors.assert_called_with(mock_scope)
 
     def test_scope_succeeding(self) -> None:
         mock_context = MagicMock()
@@ -456,12 +454,12 @@ class TestJobScopeCondition(TestCase):
         sut = scope_succeeding(mock_scope)
         self.assertEqual("Scope is succeeding.", repr(sut))
 
-        mock_context.get_exceptions.return_value = [Exception()]
+        mock_context.get_errors.return_value = [Exception()]
         self.assertEqual((False, "Scope is succeeding."), sut(mock_context))
-        mock_context.get_exceptions.assert_called_with(mock_scope)
+        mock_context.get_errors.assert_called_with(mock_scope)
 
         mock_context.reset_mock()
-        mock_context.get_exceptions.return_value = []
+        mock_context.get_errors.return_value = []
 
         self.assertEqual((True, "Scope is succeeding."), sut(mock_context))
-        mock_context.get_exceptions.assert_called_with(mock_scope)
+        mock_context.get_errors.assert_called_with(mock_scope)

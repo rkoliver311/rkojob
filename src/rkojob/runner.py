@@ -29,9 +29,9 @@ class JobRunnerImpl:
         :param scope: The scope to run.
         """
         self._run_scope(context, scope)
-        exceptions: list[Exception] = context.get_exceptions()
-        if exceptions:
-            raise JobException("\n".join([str(e) for e in exceptions]))
+        errors: list[Exception] = context.get_errors()
+        if errors:
+            raise JobException("\n".join([str(e) for e in errors]))
 
     def _run_scope(self, context: JobContext, scope: JobScope) -> None:
         # Run and then teardown a scope.
