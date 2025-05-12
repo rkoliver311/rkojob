@@ -75,6 +75,22 @@ To run the job:
 rkojob run --job build_and_test.job --values dry_run=true
 ```
 
+Values can also be loaded from a YAML file using the `--values-from` option:
+
+```yaml
+dry_run: True
+docker:
+  tag: release
+  registry: gcr.io
+```
+
+Nested values can be accessed using dot delimited keys:
+
+```python
+docker_tag = context_value("docker.tag")
+docker_registry = context_value("docker.registry")
+```
+
 ## Core Concepts
 
 ### `JobContext`

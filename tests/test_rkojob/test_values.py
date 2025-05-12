@@ -8,6 +8,7 @@ from rkojob.values import (
     LazyValue,
     MappedValueProvider,
     NoValue,
+    NoValueError,
     ValueKey,
     ValueRef,
     Values,
@@ -32,7 +33,7 @@ class TestValueRef(TestCase):
         self.assertEqual("value", ValueRef("value").value)
 
     def test_no_value(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = ValueRef().value
         self.assertEqual("ValueRef() has no value", str(e.exception))
 
@@ -69,10 +70,10 @@ class TestValueRef(TestCase):
         self.assertFalse(sut.has_value)
 
     def test_str(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             str(ValueRef())
         self.assertEqual("ValueRef() has no value", str(e.exception))
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             str(ValueRef(name="name"))
         self.assertEqual("ValueRef(name=name) has no value", str(e.exception))
 
@@ -94,7 +95,7 @@ class TestMappedValueProvider(TestCase):
         self.assertEqual("FOO", MappedValueProvider(lambda x: str(x).upper(), ValueRef("foo")).value)
 
     def test_value_negative(self):
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = MappedValueProvider(lambda x: x.upper(), ValueRef()).value
         self.assertEqual("MappedValueProvider has no value", str(e.exception))
 
@@ -114,12 +115,12 @@ class TestComputedValue(TestCase):
         self.assertEqual("value", ComputedValue(lambda: "value").value)
 
     def test_no_value(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = ComputedValue(None).value  # type: ignore[arg-type]
         self.assertEqual("ComputedValue has no value", str(e.exception))
 
     def test_no_value_with_name(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = ComputedValue(None, name="name").value  # type: ignore[arg-type]
         self.assertEqual("ComputedValue(name=name) has no value", str(e.exception))
 
@@ -135,12 +136,12 @@ class TestLazyValue(TestCase):
         self.assertEqual("value", LazyValue(lambda: "value").value)
 
     def test_no_value(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = LazyValue(None).value  # type: ignore[arg-type]
         self.assertEqual("LazyValue has no value", str(e.exception))
 
     def test_no_value_with_name(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = LazyValue(None, name="name").value  # type: ignore[arg-type]
         self.assertEqual("LazyValue(name=name) has no value", str(e.exception))
 
@@ -251,13 +252,13 @@ class TestValues(TestCase):
         self.assertFalse(sut.has_value("str_ref"))
 
     def test_get_no_value(self) -> None:
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = Values().get("int_ref")
         self.assertEqual("Values has no value associated with key 'int_ref'", str(e.exception))
 
     def test_get_ref_no_value(self) -> None:
         int_ref: ValueRef[int] = Values().get_ref("int_ref")
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = int_ref.get()
         self.assertEqual("Values has no value associated with key 'int_ref'", str(e.exception))
 
@@ -270,6 +271,45 @@ class TestValues(TestCase):
 
         sut.unset("str_prop")
         self.assertEqual(set(), sut.keys())
+
+    def test_get_nested_key_and_dict(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual(("b", {"b": "c"}), sut._get_nested_key_and_dict("root.a.b"))
+
+        sut = Values(root="a")
+        self.assertEqual(("root", {"root": "a"}), sut._get_nested_key_and_dict("root"))
+
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual((None, None), sut._get_nested_key_and_dict("root.a.b.c"))
+
+    def test_get_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertEqual({"a": {"b": "c"}}, sut.get("root"))
+        self.assertEqual({"b": "c"}, sut.get("root.a"))
+        self.assertEqual("c", sut.get("root.a.b"))
+
+    def test_has_value_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        self.assertTrue(sut.has_value("root"))
+        self.assertTrue(sut.has_value("root.a"))
+        self.assertTrue(sut.has_value("root.a.b"))
+        self.assertFalse(sut.has_value("root.a.z"))
+
+    def test_set_nested(self) -> None:
+        sut = Values(root={"a": "b"})
+        sut.set("root.a", {"b": "c"})
+        self.assertEqual({"root": {"a": {"b": "c"}}}, sut._values)
+
+        sut.set("root.a.b", "d")
+        self.assertEqual({"root": {"a": {"b": "d"}}}, sut._values)
+
+        sut.set("root.a.x.y", "z")
+        self.assertEqual({"root": {"a": {"b": "d", "x": {"y": "z"}}}}, sut._values)
+
+    def test_unset_nested(self) -> None:
+        sut = Values(root={"a": {"b": "c"}})
+        sut.unset("root.a")
+        self.assertEqual({"root": {}}, sut._values)
 
 
 class TestEnvironmentVariable(TestCase):
@@ -288,14 +328,26 @@ class TestEnvironmentVariable(TestCase):
         mock_getenv.return_value = NoValue
         self.assertFalse(EnvironmentVariable("int_ref", bool).has_value)
 
+    def test_has_value_default(self) -> None:
+        self.assertTrue(EnvironmentVariable("Lets_Hope_This_Is_Not_Set_rkojob", as_str, default="default").has_value)
+
     @patch("rkojob.values.os.getenv")
     def test_get_no_value(self, mock_getenv) -> None:
         mock_getenv.return_value = NoValue
-        with self.assertRaises(ValueError) as e:
+        with self.assertRaises(NoValueError) as e:
             _ = EnvironmentVariable("path_ref", str).get()
         self.assertEqual("Environment variable 'path_ref' is not set.", str(e.exception))
+
+    def test_get_default(self) -> None:
+        self.assertEqual(
+            "default", EnvironmentVariable("Lets_Hope_This_Is_Not_Set_rkojob", as_str, default="default").get()
+        )
 
     def test_repr(self) -> None:
         self.assertEqual("environment_variable('key')", repr(EnvironmentVariable("key", str)))
         self.assertEqual("environment_variable('key')", repr(EnvironmentVariable("key", as_str)))
         self.assertEqual("environment_variable('key', as_bool)", repr(EnvironmentVariable("key", as_bool)))
+        self.assertEqual(
+            "environment_variable('key', as_bool, default=True)",
+            repr(EnvironmentVariable("key", as_bool, default=True)),
+        )

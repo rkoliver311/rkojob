@@ -1,5 +1,5 @@
 # Dog-fooding: A set of custom lint checks using rkojob
-
+from rkojob import context_value
 from rkojob.actions import VerifyTestStructure
 from rkojob.job import (
     Job,
@@ -7,7 +7,6 @@ from rkojob.job import (
     JobStep,
     lazy_action,
 )
-from rkojob.values import ValueKey
 
 job = Job(
     "custom-checks",
@@ -19,9 +18,9 @@ job = Job(
                     "verify-test-structure",
                     action=lazy_action(
                         VerifyTestStructure,
-                        src_path=ValueKey("src_path"),
-                        tests_path=ValueKey("tests_path"),
-                        errors=ValueKey("errors"),
+                        src_path=context_value("src_path"),
+                        tests_path=context_value("tests_path"),
+                        errors=context_value("errors", default=[]),
                     ),
                 )
             ],

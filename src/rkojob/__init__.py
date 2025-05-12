@@ -23,6 +23,9 @@ from rkojob.delegates import delegate
 from rkojob.values import (
     ComputedValue,
     EnvironmentVariable,
+    NoValue,
+    NoValueError,
+    NoValueType,
     ValueConsumer,
     ValueKey,
     ValueProvider,
@@ -348,28 +351,42 @@ including those that require a ``JobContext``.
 
 @overload
 def resolve_value(
-    value: ValueKey[T_co], *, context: JobContext | None = ..., default: T_co | None = ...
+    value: ValueKey[T_co],
+    *,
+    context: JobContext | None = ...,
+    default: T_co | None = ...,
+    raise_no_value: bool = ...,
 ) -> T | None: ...
 
 
 @overload
 def resolve_value(
-    value: ValueRef[T_co], *, context: JobContext | None = ..., default: T_co | None = ...
+    value: ValueRef[T_co], *, context: JobContext | None = ..., default: T_co | None = ..., raise_no_value: bool = ...
 ) -> T | None: ...
 
 
 @overload
 def resolve_value(
-    value: JobCallable[T_co], *, context: JobContext | None = ..., default: T_co | None = ...
+    value: JobCallable[T_co],
+    *,
+    context: JobContext | None = ...,
+    default: T_co | None = ...,
+    raise_no_value: bool = ...,
 ) -> T | None: ...
 
 
 @overload
-def resolve_value(value: T, *, context: JobContext | None = ..., default: T_co | None = ...) -> T_co | None: ...
+def resolve_value(
+    value: T, *, context: JobContext | None = ..., default: T_co | None = ..., raise_no_value: bool = ...
+) -> T_co | None: ...
 
 
 def resolve_value(
-    value: JobResolvableValue[T_co], *, context: JobContext | None = None, default: T_co | None = None
+    value: JobResolvableValue[T_co],
+    *,
+    context: JobContext | None = None,
+    default: T_co | None = None,
+    raise_no_value: bool = False,
 ) -> T_co | None:
     """
     Resolve a ``JobResolvableValue`` using the optional `context` if needed.
@@ -378,72 +395,110 @@ def resolve_value(
     :param context: An optional ``JobContext`` to aid in value resolution.
     :param default: An optional default value to return if the value cannot be resolved. For example, if the `value` is
      a ``ValueRef`` that holds no value or the value is a ``ValueKey`` but no context was provided.
+    :param raise_no_value: Whether to raise a NoValueError if the value cannot be resolved.
+    :returns: The value or `default`.
     """
     if isinstance(value, ValueKey):
-        if not context:
-            return default
-        return context.values.get_or_else(value, default=default)
+        if context:
+            if raise_no_value or context.values.has_value(value):
+                return context.values.get(value)
+            else:
+                return default
+        if raise_no_value:
+            raise NoValueError("Unable to resolve value without context.")
+        return default
 
     if isinstance(value, ValueProvider):
-        return value.get() if value.has_value else default
+        if raise_no_value or value.has_value:
+            return value.get()
+        return default
 
     if isinstance(value, JobCallable):
-        return value(context) if context else default
+        if context:
+            return value(context)
+        if raise_no_value:
+            raise NoValueError("Unable to resolve value without context.")
+        return default
 
     return cast(T_co, value)
 
 
-def resolve_values(values: Iterable[JobResolvableValue[Any]], *, context: JobContext | None = None) -> list[Any]:
-    return [resolve_value(value, context=context) for value in values]
+def resolve_values(
+    values: Iterable[JobResolvableValue[Any]], *, context: JobContext | None = None, raise_no_value: bool = True
+) -> list[Any]:
+    return [resolve_value(value, context=context, raise_no_value=raise_no_value) for value in values]
 
 
 def resolve_map(
-    values: dict[Any, JobResolvableValue[Any]] | None = None, context: JobContext | None = None, **kwargs
+    values: dict[Any, JobResolvableValue[Any]] | None = None,
+    context: JobContext | None = None,
+    raise_no_value: bool = True,
+    **kwargs,
 ) -> dict[Any, Any]:
     if values is None:
         values = kwargs
-    return {key: resolve_value(value, context=context) for key, value in values.items()}
+    return {key: resolve_value(value, context=context, raise_no_value=raise_no_value) for key, value in values.items()}
 
 
-FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([^{}!:]+)(?:![rs])?(?::[^{}]+)?}")
+FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([a-zA-Z_][\w\.]*)(?:![rs])?(?::[^{}]+)?}")
 
 
 class lazy_format:
-    def __init__(self, format: str, **kwargs) -> None:
+    def __init__(self, template: str, **overrides: JobResolvableValue[Any]) -> None:
         """
         Lazily format a string using the provided `JobResolvableValue` instances and
         values from the *context* passed into `resolve_value`.
 
         :param value: The format string contain `{placeholder}` values.
-        :param kwargs: `JobResolvableValue` to use to replace placeholders.
+        :param overrides: `JobResolvableValue` to use to replace placeholders.
         """
-        self.format: str = format
-        self.data: dict[str, Any] = kwargs
+        self._template: str = template
+        self._overrides: dict[str, JobResolvableValue[Any]] = overrides
 
     def __call__(self, context: JobContext) -> str:
         # Provided values
-        values: dict[str, Any] = {**self.data}
+        values: dict[str, JobResolvableValue[Any]] = {**self._overrides}
         # Referenced values
-        template_keys: list[str] = FORMAT_MAP_KEY_PATTERN.findall(self.format)
+        template_keys: list[str] = FORMAT_MAP_KEY_PATTERN.findall(self._template)
         # Missing values
-        missing_keys: set[str] = template_keys - values.keys()
+        missing_keys: set[str] = set(template_keys) - set(values)
         # Add missing values from the context
         values.update({key: ValueKey(key) for key in missing_keys})
-        return self.format.format_map(resolve_map(values, context=context))
+
+        resolved: dict[str, Any] = resolve_map(values, context=context)
+
+        def substitute(match: re.Match) -> str:
+            key = match.group(1)
+            try:
+                return str(resolved[key])
+            except KeyError:  # pragma: no cover
+                raise KeyError(f"Missing value for key '{key}' in lazy_format string: {self._template}")
+
+        return FORMAT_MAP_KEY_PATTERN.sub(substitute, self._template)
 
     def __repr__(self) -> str:
-        data_str: str = ""
-        if self.data:
-            data_str = ", " + ", ".join(f"{key}={repr(value)}" for key, value in self.data.items())
-        return f"lazy_format('{self.format}'{data_str})"
+        data_str = ", ".join(f"{k}={v!r}" for k, v in self._overrides.items())
+        return f"lazy_format({self._template!r}{', ' + data_str if data_str else ''})"
 
 
 class context_value(Generic[R_co]):
-    def __init__(self, key: str, coercer: Callable[[Any], R_co] | None = None) -> None:
+    def __init__(
+        self, key: str, coercer: Callable[[Any], R_co] | None = None, default: R_co | NoValueType = NoValue
+    ) -> None:
+        """
+        Retrieves a value from the context by key.
+        :param key: The key of the value.
+        :param coercer: A conversion function to coerce the value to the required type.
+        :param default: A default value to set and return if no value is associated with the key.
+        """
         self._key: str = key
         self._coercer: Callable[[Any], R_co] | None = coercer
+        self._default: R_co | NoValueType = default
 
     def __call__(self, context: JobContext) -> R_co:
+        if not context.values.has_value(self._key) and self._default is not NoValue:
+            context.values.set(self._key, self._default)
+            return cast(R_co, self._default)
         value: Any = context.values.get(self._key)
         if self._coercer:
             value = self._coercer(value)
