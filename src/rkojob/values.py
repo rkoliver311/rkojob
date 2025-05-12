@@ -25,8 +25,13 @@ T_co = TypeVar("T_co", covariant=True)
 T_contra = TypeVar("T_contra", contravariant=True)
 
 
+class NoValueError(Exception):
+    def __init__(self, message: str | None = None):
+        super().__init__("No value" if message is None else message)
+
+
 @final
-class _NoValue:
+class NoValueType:
     """Sentinel type to distinguish from ``None``."""
 
     def __bool__(self) -> bool:
@@ -36,11 +41,11 @@ class _NoValue:
         return "No Value"
 
 
-NoValue: Final[_NoValue] = _NoValue()
+NoValue: Final[NoValueType] = NoValueType()
 """Sentinel value to distinguish from ``None``."""
 
 
-def _is_value(value: T | _NoValue) -> TypeGuard[T]:
+def _is_value(value: T | NoValueType) -> TypeGuard[T]:
     """
     ``TypeGuard`` to insist that `value` is not ``NoValue``.
     :param value: The value check.
@@ -51,7 +56,7 @@ def _is_value(value: T | _NoValue) -> TypeGuard[T]:
 @runtime_checkable
 class ValueProvider(Protocol[T_co]):
     """
-    A protocol for a type that provides a value.  A ``ValueError`` should be raised if ``get()`` is called when no
+    A protocol for a type that provides a value.  A ``NoValueError`` should be raised if ``get()`` is called when no
     value is available.  The ``has_value`` property can be used to check whether a value is available.
     """
 
@@ -64,7 +69,7 @@ class ValueProvider(Protocol[T_co]):
 @runtime_checkable
 class ValueConsumer(Protocol[T_contra]):
     """
-    A protocol for a type that consumes a value.  A ``ValueError`` should be raised if value cannot be set or unset
+    A protocol for a type that consumes a value.  A ``NoValueError`` should be raised if value cannot be set or unset
     via the ``set()`` and ``unset()`` methods.
     """
 
@@ -74,14 +79,14 @@ class ValueConsumer(Protocol[T_contra]):
 
 
 class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
-    def __init__(self, value: T | _NoValue = NoValue, name: str | None = None) -> None:
+    def __init__(self, value: T | NoValueType = NoValue, name: str | None = None) -> None:
         """
         A read/write value container that implements the ``ValueProvider[T]`` and ``ValueConsumer[T]`` protocols.
 
         :param value: The initial value of the ``ValueRef``.
         :param name: An optional name for the ``ValueRef``.
         """
-        self._value: T | _NoValue = NoValue
+        self._value: T | NoValueType = NoValue
         self._name: str | None = name
 
         if _is_value(value):
@@ -89,11 +94,11 @@ class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
 
     def get(self) -> T:
         """
-        Get the value currently held by this instance. A ``ValueError`` is raised if no value is present.
+        Get the value currently held by this instance. A ``NoValueError`` is raised if no value is present.
         :returns: The value held by this instance.
         """
         if not self.has_value:
-            raise ValueError(f"{repr(self)} has no value")
+            raise NoValueError(f"{repr(self)} has no value")
         return cast(T, self._value)
 
     @property
@@ -116,7 +121,7 @@ class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
 
     @property
     def value(self) -> T:
-        """:returns: The value held by this instance. A ``ValueError`` is raised if no value is present."""
+        """:returns: The value held by this instance. A ``NoValueError`` is raised if no value is present."""
         return self.get()
 
     @value.setter
@@ -175,7 +180,7 @@ class MappedValueProvider(ValueProvider[U]):
     def get(self) -> U:
         """:returns: The transformed value."""
         if self._provider is None or not self.has_value:
-            raise ValueError(f"{repr(self)} has no value")
+            raise NoValueError(f"{repr(self)} has no value")
         return self._func(self._provider.get())
 
     @property
@@ -207,7 +212,7 @@ class ComputedValue(ValueProvider[T]):
 
     def get(self) -> T:
         if self._func is None:
-            raise ValueError(f"{repr(self)} has no value")
+            raise NoValueError(f"{repr(self)} has no value")
         return self._func()
 
     @property
@@ -228,7 +233,7 @@ class LazyValue(ValueProvider[T]):
     def __init__(self, func: Callable[[], T], name: str | None = None) -> None:
         self._func: Callable[[], T] = func
         self._name = name
-        self._value: T | _NoValue = NoValue
+        self._value: T | NoValueType = NoValue
 
     @property
     def value(self) -> T:
@@ -236,7 +241,7 @@ class LazyValue(ValueProvider[T]):
 
     def get(self) -> T:
         if self._func is None:
-            raise ValueError(f"{repr(self)} has no value")
+            raise NoValueError(f"{repr(self)} has no value")
         if not _is_value(self._value):
             self._value = self._func()
         return self._value
@@ -252,30 +257,36 @@ class LazyValue(ValueProvider[T]):
 
 
 class EnvironmentVariable(ValueProvider[T_co]):
-    def __init__(self, name: str, coercer: Callable[[str], T_co]) -> None:
+    def __init__(self, name: str, coercer: Callable[[str], T_co], default: T_co | NoValueType = NoValue) -> None:
         """
         A type-safe ``ValueProvider`` that provides access to an environment variable.
 
         :param name: The name of the environment variable.
         :param coercer: The function used to coerce the environment variable value (a ``str``) to the desired type.
+        :param default: The default value to return if the environment variable is not set.
         """
         self._name: str = name
         self._coercer: Callable[[str], T_co] = coercer
+        self._default: T_co | NoValueType = default
 
     def get(self) -> T_co:
-        value: str | _NoValue = os.getenv(self._name, default=NoValue)
+        value: Any = os.getenv(self._name, default=self._default)
         if _is_value(value):
             return self._coercer(value)
-        raise ValueError(f"Environment variable '{self._name}' is not set.")
+        raise NoValueError(f"Environment variable '{self._name}' is not set.")
 
     @property
     def has_value(self) -> bool:
-        return _is_value(os.getenv(self._name, default=NoValue))
+        return _is_value(os.getenv(self._name, default=self._default))
 
     def __repr__(self) -> str:
+        value: str = f"environment_variable('{self._name}'"
         if self._coercer not in (as_str, str):
-            return f"environment_variable('{self._name}', {self._coercer.__name__})"
-        return f"environment_variable('{self._name}')"
+            value += f", {self._coercer.__name__}"
+        if _is_value(self._default):
+            value += f", default={repr(self._default)}"
+        value += ")"
+        return value
 
 
 class ValueKey(Generic[T]):
@@ -332,7 +343,7 @@ class Values:
 
     def get(self, key: ValueKey[T] | str) -> T:
         """
-        Get the value associated with the provided `key`. If no value is present a ``ValueError`` is raised
+        Get the value associated with the provided `key`. If no value is present a ``NoValueError`` is raised
         (not a ``KeyError``).
 
         :param key: A `ValueKey` or `str` key.
@@ -341,7 +352,7 @@ class Values:
         if isinstance(key, ValueKey):
             key = key.name
         if key not in self._values:
-            raise ValueError(f"{repr(self)} has no value associated with key '{key}'")
+            raise NoValueError(f"{repr(self)} has no value associated with key '{key}'")
         return self._values[key]
 
     def has_value(self, key: ValueKey[T] | str) -> bool:

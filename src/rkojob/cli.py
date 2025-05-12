@@ -76,7 +76,7 @@ class Cli:
 
     def load_values_from_file(self, path: str) -> dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            data: Any = yaml.safe_load(f)
 
         if not isinstance(data, dict):
             raise ValueError(f"Expected a dictionary at the root of {path}, got {type(data).__name__}")

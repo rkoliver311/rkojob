@@ -19,7 +19,7 @@ from rkojob import (
 )
 from rkojob.coerce import as_bool
 from rkojob.factories import JobContextFactory
-from rkojob.values import ValueRef, Values
+from rkojob.values import NoValueError, ValueRef, Values
 
 
 class TestJobException(TestCase):
@@ -238,6 +238,12 @@ class TestContextValue(TestCase):
         sut: JobResolvableValue[str] = context_value("key")
         self.assertEqual("value", resolve_value(sut, context=mock_context))
 
+    def test_default(self) -> None:
+        mock_context = MagicMock(values=Values())
+        sut: JobResolvableValue[str] = context_value("key", default="default")
+        self.assertEqual("default", resolve_value(sut, context=mock_context))
+        self.assertEqual("default", mock_context.values.get("key"))
+
     def test_coerce(self) -> None:
         mock_context = MagicMock(values=Values(key="True"))
         sut: JobResolvableValue[bool] = context_value("key", coercer=as_bool)
@@ -261,6 +267,11 @@ class TestResolveValue(TestCase):
     def test_callable_no_context(self) -> None:
         self.assertEqual("default", resolve_value(lambda ctx: ctx.values.get_ref("foo").value, default="default"))
 
+    def test_callable_no_context_raise(self) -> None:
+        with self.assertRaises(NoValueError) as e:
+            resolve_value(lambda ctx: ctx.values.get_ref("foo").value, default="default", raise_no_value=True)
+        self.assertEqual("Unable to resolve value without context.", str(e.exception))
+
     def test_property(self) -> None:
         self.assertEqual("value", resolve_value(ValueRef("value")))
 
@@ -277,6 +288,11 @@ class TestResolveValue(TestCase):
 
     def test_property_key_no_context(self) -> None:
         self.assertEqual("default", resolve_value(ValueKey("key"), default="default"))
+
+    def test_property_key_no_context_raise(self) -> None:
+        with self.assertRaises(NoValueError) as e:
+            resolve_value(ValueKey("key"), default="default", raise_no_value=True)
+        self.assertEqual("Unable to resolve value without context.", str(e.exception))
 
     def test_value(self) -> None:
         self.assertEqual("value", resolve_value("value"))
@@ -340,6 +356,13 @@ class TestLazyFormat(TestCase):
         ref2 = ValueRef("value2")
         sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
         self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=Values(ref1="value1"))))
+
+    def test_missing_key(self) -> None:
+        ref2 = ValueRef("value2")
+        sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
+        with self.assertRaises(NoValueError) as e:
+            _ = resolve_value(sut, context=MagicMock(values=Values()), raise_no_value=True)
+        self.assertEqual("Values has no value associated with key 'ref1'", str(e.exception))
 
     def test_repr(self) -> None:
         self.assertEqual("lazy_format('{ref1}, {ref2}')", repr(lazy_format("{ref1}, {ref2}")))
