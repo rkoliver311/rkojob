@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  tox:
+  verify_change:
+    name: Verify Change
     runs-on: ubuntu-latest
 
     strategy:
@@ -46,9 +47,3 @@ jobs:
         --job verify_change.verify_change \
         --values-from verify_change.yaml \
         >> $GITHUB_STEP_SUMMARY
-    - name: Run Lint
-      run: tox -e lint
-    - name: Run Type Checks
-      run: tox -e type
-    - name: Run Tests
-      run: tox -e py${{ matrix.python-version }}
