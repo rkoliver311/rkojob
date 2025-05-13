@@ -333,7 +333,9 @@ class Values:
 
         :param kwargs: key/value pairs to add to the ``Values`` instance.
         """
-        self._values: dict[str, Any] = {**kwargs}
+        self._values: dict[str, Any] = {}
+        for key, value in kwargs.items():
+            self.set(key, value)
 
     def keys(self) -> Set[str]:
         """
