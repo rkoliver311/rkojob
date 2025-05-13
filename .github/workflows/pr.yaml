@@ -27,10 +27,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r dev-requirements.txt
+    - name: Install rkoJob
+      run: pip install -e .
     - name: Run Custom Checks
+      env:
+        PYTHONPATH: $GITHUB_WORKSPACE/tests
       run: |
-        pip install -e .
-        PYTHONPATH=$GITHUB_WORKSPACE/tests rkojob run \
+        rkojob run \
         --job custom_checks.job \
         --value src_path=$GITHUB_WORKSPACE/src \
         --value tests_path=$GITHUB_WORKSPACE/tests \
