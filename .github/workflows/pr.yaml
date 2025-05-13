@@ -26,6 +26,18 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install tox
-    - name: Run Tox
-      run: tox
+        pip install -r dev-requirements.txt
+    - name: Run Custom Checks
+      run: |
+        pip install -e .
+        PYTHONPATH=$GITHUB_WORKSPACE/tests rkojob run \
+        --job custom_checks.job \
+        --value src_path=$GITHUB_WORKSPACE/src \
+        --value tests_path=$GITHUB_WORKSPACE/tests \
+        >> $GITHUB_STEP_SUMMARY
+    - name: Run Lint
+      run: tox -e lint
+    - name: Run Type Checks
+      run: tox -e type
+    - name: Run Tests
+      run: tox -e py${{ matrix.python-version }}
