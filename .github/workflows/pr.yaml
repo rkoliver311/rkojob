@@ -34,7 +34,7 @@ jobs:
       run: |
         cat <<EOF > verify_change.yaml
         verify-change:
-          python_version: ${{ matrix.python-version }}
+          python_version: "${{ matrix.python-version }}"
           static-analysis:
             verify-test-structure:
               src_path: ${GITHUB_WORKSPACE}/src
