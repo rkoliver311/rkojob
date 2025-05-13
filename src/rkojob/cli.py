@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 from argparse import ArgumentParser, Namespace
 from types import ModuleType
@@ -8,6 +9,7 @@ import yaml
 
 from rkojob import JobException, JobScope
 from rkojob.factories import JobContextFactory, JobRunnerFactory
+from rkojob.writer import JobStatusWriter
 
 
 class Cli:
@@ -56,11 +58,22 @@ class Cli:
         values: dict[str, Any] = self.read_values(args)
 
         try:
-            context = JobContextFactory.create(values=values)
+            context = JobContextFactory.create(values=values, status_writer=self.get_status_writer())
             JobRunnerFactory.create().run(context, job)
             return self.success()
         except Exception as e:
             return self.error(f"Error during job run: {e}")
+
+    def get_status_writer(self) -> JobStatusWriter | None:
+        return (
+            JobStatusWriter(stream=sys.stdout, show_detail=False, collapsible_output=True)
+            if self.is_github_actions
+            else None
+        )
+
+    @property
+    def is_github_actions(self) -> bool:
+        return bool(os.getenv("GITHUB_ACTIONS"))
 
     def read_values(self, args: Namespace) -> dict[str, Any]:
         values: dict[str, Any] = {}

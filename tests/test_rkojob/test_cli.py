@@ -5,11 +5,13 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any
 from unittest import TestCase
+from unittest.mock import patch
 
 import yaml
 
 from rkojob import JobException
 from rkojob.cli import Cli
+from rkojob.writer import JobStatusWriter
 
 
 class TestCli(TestCase):
@@ -87,3 +89,24 @@ class TestCli(TestCase):
         args = Namespace(values_from="no_such_file.yml", values=[])
         with self.assertRaises(JobException):
             self.sut.read_values(args)
+
+    @patch("rkojob.cli.os.getenv")
+    def test_is_github_actions(self, mock_getenv) -> None:
+        mock_getenv.return_value = None
+        self.assertFalse(Cli().is_github_actions)
+
+        mock_getenv.return_value = "true"
+        self.assertTrue(Cli().is_github_actions)
+
+    @patch("rkojob.cli.os.getenv")
+    def test_get_status_writer(self, mock_getenv) -> None:
+        sut: Cli = Cli()
+
+        mock_getenv.return_value = None
+        self.assertIsNone(sut.get_status_writer())
+
+        mock_getenv.return_value = "true"
+        status_writer = sut.get_status_writer()
+        self.assertIsInstance(status_writer, JobStatusWriter)
+        assert status_writer is not None
+        self.assertTrue(status_writer._collapsible_output)
