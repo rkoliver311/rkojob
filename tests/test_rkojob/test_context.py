@@ -14,6 +14,7 @@ from rkojob.context import (
     JobScopeStatuses,
     JobStatusWriter,
     JobStatusWriterEvent,
+    OutputEvent,
     ScopeFinishErrorEvent,
     ScopeFinishErrorsEvent,
     ScopeFinishEvent,
@@ -92,6 +93,34 @@ class StubScope:
     def __init__(self, name, type):
         self.name = name
         self.type = type
+
+
+class TestOutputEvent(TestCase):
+    def test_collapsible(self) -> None:
+        stream: StringIO = StringIO()
+        sut = OutputEvent("this\nis\noutput\n", label="label", collapsible=True)
+        sut.write_event(stream)
+        self.assertEqual(
+            "<details>\n"
+            "<summary>label</summary>\n"
+            "\n"
+            "    this\n"
+            "    is\n"
+            "    output\n"
+            "\n"
+            "</details>\n"
+            "\n",
+            stream.getvalue(),
+        )
+
+    def test_not_collapsible(self) -> None:
+        stream: StringIO = StringIO()
+        sut = OutputEvent("this\nis\noutput\n", label="label", collapsible=False)
+        sut.write_event(stream)
+        self.assertEqual(
+            "label:\n" "\n" "    this\n" "    is\n" "    output\n" "\n",
+            stream.getvalue(),
+        )
 
 
 class TestJobStatusWriter(TestCase):

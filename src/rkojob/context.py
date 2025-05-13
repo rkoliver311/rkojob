@@ -356,12 +356,18 @@ class ErrorEvent(JobStatusWriterEvent[str | Exception]):
 
 
 class OutputEvent(JobStatusWriterEvent[str | Iterable[str]]):
-    def __init__(self, output: str | Iterable[str], label: str) -> None:
+    def __init__(self, output: str | Iterable[str], label: str, collapsible: bool = False) -> None:
         super().__init__(output)
         self.label: str = label
+        self._collapsible: bool = collapsible
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"{self.label}:\n")
+        if self._collapsible:
+            stream.write("<details>\n")
+            stream.write(f"<summary>{self.label}</summary>\n")
+        else:
+            stream.write(f"{self.label}:\n")
+
         output: str | Iterable[str] = self.event
         if isinstance(output, str):
             output = [output]
@@ -370,6 +376,9 @@ class OutputEvent(JobStatusWriterEvent[str | Iterable[str]]):
                 line = line[:-1]
             for subline in line.split("\n"):
                 stream.write(f"\n    {subline}")
+
+        if self._collapsible:
+            stream.write("\n\n</details>")
 
 
 class JobStatusWriter(JobStatus):
@@ -380,8 +389,10 @@ class JobStatusWriter(JobStatus):
         self,
         stream: TextIO,
         show_detail: bool = True,
+        collapsible_output: bool = False,
     ) -> None:
         self._show_detail: bool = show_detail
+        self._collapsible_output: bool = collapsible_output
         self._stream: TextIO = stream
         self._event_stack: list[JobStatusWriterEvent] = []
 
@@ -490,7 +501,7 @@ class JobStatusWriter(JobStatus):
             self._write_event_and_append(event)
 
     def output(self, output: str | Iterable[str], label: str | None = None) -> None:
-        self._write_event_and_append(OutputEvent(output, label=label or "output"))
+        self._write_event_and_append(OutputEvent(output, label=label or "output", collapsible=self._collapsible_output))
 
     def _get_errors(
         self, event_type: type[JobStatusWriterEvent], include_children: bool = True
