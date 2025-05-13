@@ -238,6 +238,12 @@ class TestJobStatusCollector(TestCase):
         self.mock_2.finish_item.assert_called_with()
 
 
+class StubScope:
+    def __init__(self, name, type):
+        self.name = name
+        self.type = type
+
+
 class TestContextValue(TestCase):
     def test(self) -> None:
         mock_context = MagicMock(values=Values(key="value"))
@@ -249,6 +255,13 @@ class TestContextValue(TestCase):
         sut: JobResolvableValue[str] = context_value("key", default="default")
         self.assertEqual("default", resolve_value(sut, context=mock_context))
         self.assertEqual("default", mock_context.values.get("key"))
+
+    def test_raise(self) -> None:
+        mock_context = MagicMock(values=Values())
+        sut: JobResolvableValue[str] = context_value("key")
+        with self.assertRaises(NoValueError) as e:
+            resolve_value(sut, context=mock_context, raise_no_value=True)
+        self.assertEqual("No context value found for key 'key'", str(e.exception))
 
     def test_coerce(self) -> None:
         mock_context = MagicMock(values=Values(key="True"))
@@ -263,6 +276,46 @@ class TestContextValue(TestCase):
     def test_repr(self) -> None:
         self.assertEqual("context_value('key')", repr(context_value("key")))
         self.assertEqual("context_value('key', as_bool)", repr(context_value("key", as_bool)))
+
+    def test_scopes(self) -> None:
+        sut: JobResolvableValue[str] = context_value("key")
+
+        mock_context = MagicMock()
+
+        mock_context.scopes = (StubScope("job", 0),)
+        mock_context.values = Values(**{"job.key": "job_value", "key": "value"})
+        self.assertEqual("job_value", resolve_value(sut, context=mock_context))
+
+        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1))
+        self.assertEqual("job_value", resolve_value(sut, context=mock_context))
+
+        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
+        mock_context.values = Values(
+            **{
+                "job.key": "job_value",
+                "job.stage.key": "stage_value",
+                "job.stage.step.key": "step_value",
+                "key": "value",
+            }
+        )
+        self.assertEqual("step_value", resolve_value(sut, context=mock_context))
+
+        sut = context_value("job.stage.key")
+        self.assertEqual("stage_value", resolve_value(sut, context=mock_context))
+
+    def test_scopes_raise(self) -> None:
+        sut: JobResolvableValue[str] = context_value("key")
+
+        mock_context = MagicMock()
+        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
+        mock_context.values = Values()
+        with self.assertRaises(NoValueError) as e:
+            resolve_value(sut, context=mock_context, raise_no_value=True)
+        self.assertEqual(
+            "No context value found for key 'key' "
+            "(first tried: ['job.stage.step.key', 'job.stage.key', 'job.key']).",
+            str(e.exception),
+        )
 
 
 class TestResolveValue(TestCase):
@@ -370,7 +423,7 @@ class TestLazyFormat(TestCase):
         sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
         with self.assertRaises(NoValueError) as e:
             _ = resolve_value(sut, context=MagicMock(values=Values()), raise_no_value=True)
-        self.assertEqual("Values has no value associated with key 'ref1'", str(e.exception))
+        self.assertEqual("No context value found for key 'ref1'", str(e.exception))
 
     def test_repr(self) -> None:
         self.assertEqual("lazy_format('{ref1}, {ref2}')", repr(lazy_format("{ref1}, {ref2}")))

@@ -461,7 +461,7 @@ class lazy_format:
         # Missing values
         missing_keys: set[str] = set(template_keys) - set(values)
         # Add missing values from the context
-        values.update({key: ValueKey(key) for key in missing_keys})
+        values.update({key: context_value(key) for key in missing_keys})
 
         resolved: dict[str, Any] = resolve_map(values, context=context)
 
@@ -494,10 +494,27 @@ class context_value(Generic[R_co]):
         self._default: R_co | NoValueType = default
 
     def __call__(self, context: JobContext) -> R_co:
+        value: Any = NoValue
+        scopes: list[str] = [scope.name for scope in context.scopes]
+        keys: list[str] = [f"{'.'.join(scopes[:i])}.{self._key}" for i in range(len(scopes), 0, -1)]
+
+        for key in keys:
+            if context.values.has_value(key):
+                value = context.values.get(key)
+                break
+
         if not context.values.has_value(self._key) and self._default is not NoValue:
             context.values.set(self._key, self._default)
             return cast(R_co, self._default)
-        value: Any = context.values.get(self._key)
+
+        if value is NoValue:
+            try:
+                value = context.values.get(self._key)
+            except NoValueError:
+                message: str = f"No context value found for key '{self._key}'"
+                if keys:
+                    message += f" (first tried: {keys})."
+                raise NoValueError(message)
         if self._coercer:
             value = self._coercer(value)
         return cast(R_co, value)
