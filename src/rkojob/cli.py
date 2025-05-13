@@ -6,9 +6,8 @@ from typing import Any, Final
 
 import yaml
 
-from rkojob import JobException
+from rkojob import JobException, JobScope
 from rkojob.factories import JobContextFactory, JobRunnerFactory
-from rkojob.job import Job
 
 
 class Cli:
@@ -53,7 +52,7 @@ class Cli:
         return parser.parse_args(argv)
 
     def run_job(self, args: Namespace) -> int:  # pragma: no cover
-        job: Job = self.get_job(args.job)
+        job: JobScope = self.get_job(args.job)
         values: dict[str, Any] = self.read_values(args)
 
         try:
@@ -94,13 +93,11 @@ class Cli:
         except ModuleNotFoundError as e:
             raise ModuleNotFoundError(f"Job module not found: {name}") from e
 
-    def get_job(self, job_name: str) -> Job:  # pragma: no cover
+    def get_job(self, job_name: str) -> JobScope:  # pragma: no cover
         module_name: str
         module_name, job_name = self._split_module_and_job(job_name)
         job_module: ModuleType = self.get_job_module(module_name)
-        job: Job = getattr(job_module, job_name)
-        if not isinstance(job, Job):
-            raise TypeError(f"{module_name}.{job_name} is not a Job instance.")
+        job: JobScope = getattr(job_module, job_name)
         return job
 
     def _split_module_and_job(self, job_name: str) -> tuple[str, str]:

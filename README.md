@@ -74,7 +74,7 @@ job = job_builder.build()
 Run the job:
 
 ```bash
-rkojob run --job build_and_test.job --values dry_run=true
+rkojob run --job build_and_test.job --value dry_run=true
 ```
 
 You can also load values from a YAML file using the `--values-from` option:

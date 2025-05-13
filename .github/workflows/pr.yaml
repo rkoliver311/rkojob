@@ -29,13 +29,22 @@ jobs:
         pip install -r dev-requirements.txt
     - name: Install rkoJob
       run: pip install -e .
-    - name: Run Custom Checks
+    - name: Create Job Values YAML
       run: |
-        PYTHONPATH=$GITHUB_WORKSPACE/tests \
+        cat <<EOF > verify_change.yaml
+        verify-change:
+          python_version: ${{ matrix.python-version }}
+          static-analysis:
+            verify-test-structure:
+              src_path: ${GITHUB_WORKSPACE}/src
+              tests_path: ${GITHUB_WORKSPACE}/tests
+        EOF
+    - name: Run Verify Change
+      run: |
+        PYTHONPATH=$GITHUB_WORKSPACE/jobs \
         rkojob run \
-        --job custom_checks.job \
-        --value src_path=$GITHUB_WORKSPACE/src \
-        --value tests_path=$GITHUB_WORKSPACE/tests \
+        --job verify_change.verify_change \
+        --values-from verify_change.yaml \
         >> $GITHUB_STEP_SUMMARY
     - name: Run Lint
       run: tox -e lint
