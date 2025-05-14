@@ -12,6 +12,7 @@ from rkojob import (
     JobException,
     JobScopeType,
     ValueRef,
+    create_scope_id,
     job_succeeding,
     scope_failing,
     scope_succeeding,
@@ -21,20 +22,22 @@ from rkojob.runner import JobRunnerImpl
 
 
 class StubGroupScope:
-    def __init__(self, name, type, scopes):
+    def __init__(self, name, type, scopes, id=None):
         self.name = name
         self.type = type
         self.scopes = scopes
+        self.id = id or create_scope_id()
 
 
 class StubActionScope:
-    def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None):
+    def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None, id=None):
         self.name = name
         self.type = type
         self.action = action
         self.teardown = teardown
         self.run_if = run_if
         self.skip_if = skip_if
+        self.id = id or create_scope_id()
 
 
 class StubScopeType(Enum):
@@ -421,40 +424,19 @@ class TestJobRunnerImpl(TestCase):
         )
 
     def test_skip_if_success(self) -> None:
-        class StubScope:
-            def __init__(self, name, type, run_if=None, skip_if=None):
-                self.name = name
-                self.type = type
-                self.run_if = run_if
-                self.skip_if = skip_if
-
         context: JobContext = JobContextFactory.create()
         sut = JobRunnerImpl()
-        step = StubScope("step", 3, skip_if=job_succeeding)
+        step = StubActionScope("step", 3, skip_if=job_succeeding)
         self.assertEqual((True, "Job is succeeding."), sut._should_skip(context, step))
 
     def test_skip_if_property(self) -> None:
-        class StubScope:
-            def __init__(self, name, type, run_if=None, skip_if=None):
-                self.name = name
-                self.type = type
-                self.run_if = run_if
-                self.skip_if = skip_if
-
         context: JobContext = JobContextFactory.create()
         sut = JobRunnerImpl()
-        step = StubScope("step", 3, skip_if=ValueRef((True, "Skip me")))
+        step = StubActionScope("step", 3, skip_if=ValueRef((True, "Skip me")))
         self.assertEqual((True, "Skip me"), sut._should_skip(context, step))
 
     def test_skip_if_value(self) -> None:
-        class StubScope:
-            def __init__(self, name, type, run_if=None, skip_if=None):
-                self.name = name
-                self.type = type
-                self.run_if = run_if
-                self.skip_if = skip_if
-
         context: JobContext = JobContextFactory.create()
         sut = JobRunnerImpl()
-        step = StubScope("step", 3, skip_if=True)
+        step = StubActionScope("step", 3, skip_if=True)
         self.assertEqual((True, ""), sut._should_skip(context, step))
