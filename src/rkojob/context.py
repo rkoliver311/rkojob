@@ -16,6 +16,7 @@ from rkojob import (
     JobBaseStatus,
     JobException,
     JobScope,
+    JobScopeID,
     JobScopeStatus,
     JobStatusCollector,
     Values,
@@ -35,14 +36,14 @@ class JobScopeStatuses(JobBaseStatus):
     """
 
     def __init__(self) -> None:
-        self._statuses: dict[JobScope, JobScopeStatus] = {}
+        self._statuses: dict[JobScopeID, JobScopeStatus] = {}
         self._scope_stack: list[JobScope] = []
-        self._errors: dict[tuple[JobScope, ...], list[str | Exception]] = {}
+        self._errors: dict[tuple[JobScopeID, ...], list[str | Exception]] = {}
 
-    def get_status(self, scope: JobScope) -> JobScopeStatus:
+    def get_status(self, scope: JobScopeID) -> JobScopeStatus:
         return self._statuses.get(scope, JobScopeStatus.UNKNOWN)
 
-    def get_errors(self, scope: JobScope | None = None) -> list[str | Exception]:
+    def get_errors(self, scope: JobScopeID | None = None) -> list[str | Exception]:
         errors: list[str | Exception] = []
         for scopes in self._errors:
             if scope is None or scope in scopes:
@@ -69,7 +70,7 @@ class JobScopeStatuses(JobBaseStatus):
         self._statuses[scope] = JobScopeStatus.SKIPPED
 
     def error(self, error: Exception | str) -> None:
-        key: Tuple[JobScope, ...] = tuple([scope for scope in self._scope_stack])
+        key: Tuple[JobScopeID, ...] = tuple([scope for scope in self._scope_stack])
         if key not in self._errors:
             self._errors[key] = []
         self._errors[key].append(error)
@@ -82,7 +83,7 @@ class JobContextImpl:
     def __init__(self, *, values: dict[str, Any] | None = None, status_writer: JobStatusWriter | None = None) -> None:
         # State that pushes and pops with the scope.
         self._state_stack: list[JobContextState] = []
-
+        self._known_scopes: dict[str, JobScope] = {}
         if values is None:
             values = {}
         self._values: Values = Values(**values)
@@ -109,6 +110,7 @@ class JobContextImpl:
     def _enter_scope(self, scope: JobScope) -> None:
         state: JobContextState = JobContextState(scope=scope)
         self._state_stack.append(state)
+        self._known_scopes[scope.id] = scope
 
     def _exit_scope(self, scope: JobScope) -> None:
         state: JobContextState = self._state_stack.pop()
@@ -129,22 +131,38 @@ class JobContextImpl:
         """
         return tuple(state.scope for state in self._state_stack)
 
+    def get_scope(self, scope_id: JobScopeID) -> JobScope:
+        """
+        Gets the `JobScope` instance associated with the provided *scope_id*.
+
+        :param scope_id: A `JobScopeID` used to identify the scope.
+        :returns: The `JobScope` associated with *scope_id* or *scope_id* if it is an instance of `JobScope`.
+        """
+        if isinstance(scope_id, JobScope):
+            # Scope ID is the scope itself.
+            return scope_id
+
+        if scope_id.id not in self._known_scopes:
+            raise JobException(f"Scope with ID '{scope_id.id}' is not known to this context.")
+
+        return self._known_scopes[scope_id.id]
+
     @property
     def status(self) -> JobStatusCollector:
         return self._status
 
-    def get_scope_status(self, scope: JobScope) -> JobScopeStatus:
+    def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus:
         return self._scope_statuses.get_status(scope)
 
-    def _get_state(self, scope: JobScope | None) -> JobContextState:
+    def _get_state(self, scope: JobScopeID | None) -> JobContextState:
         # Get the state for the provided scope
         if not self._state_stack:
             raise JobException("No state found")
         if scope is None:
             return self._state_stack[-1]
-        state: JobContextState | None = next(iter(it for it in self._state_stack if it.scope.name == scope.name), None)
+        state: JobContextState | None = next(iter(it for it in self._state_stack if it.scope.id == scope.id), None)
         if state is None:
-            raise JobException(f"No state found for scope '{scope.name}'")
+            raise JobException(f"No state found for scope '{scope}'")
         return state
 
     def error(self, error: str | Exception) -> Exception:
@@ -159,7 +177,7 @@ class JobContextImpl:
         self.status.error(error)
         return error
 
-    def get_errors(self, scope: JobScope | None = None) -> list[Exception]:
+    def get_errors(self, scope: JobScopeID | None = None) -> list[Exception]:
         """
         Return exceptions recorded for *scope* or for *all* scopes if omitted.
 

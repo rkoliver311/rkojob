@@ -7,7 +7,7 @@ from enum import Enum, auto
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob import JobException, JobScopeStatus, Values
+from rkojob import JobException, JobScopeStatus, Values, create_scope_id
 from rkojob.context import (
     JobContextImpl,
     JobScopeStatuses,
@@ -79,15 +79,22 @@ class TestJobScopeStatuses(TestCase):
 
 
 class StubScope:
-    def __init__(self, name, type):
+    def __init__(self, name, type, id=None):
         self.name = name
         self.type = type
+        self.id = id or create_scope_id()
+
+    def __str__(self):
+        return f"{self.type} {self.name}"
 
 
 class StubScopeType(Enum):
     JOB = auto()
     STAGE = auto()
     STEP = auto()
+
+    def __str__(self):
+        return self.name.capitalize()
 
 
 class TestJobContextImpl(TestCase):
@@ -104,19 +111,19 @@ class TestJobContextImpl(TestCase):
             _ = sut._get_state(None)
         self.assertEqual("No state found", str(e.exception))
 
-        mock_scope_1 = MagicMock()
-        mock_scope_1.name = "scope_1"
-        mock_scope_2 = MagicMock()
-        mock_scope_2.name = "scope_2"
+        mock_scope_1 = StubScope("scope_1", StubScopeType.JOB)
+        mock_scope_2 = StubScope("scope_2", StubScopeType.STAGE)
+        mock_scope_2_id = MagicMock(id=mock_scope_2.id)
+
         with sut.in_scope(mock_scope_1):
-            self.assertIsNotNone(sut._get_state(mock_scope_1))
+            self.assertIs(mock_scope_1, sut._get_state(mock_scope_1).scope)
 
             with sut.in_scope(mock_scope_2):
-                self.assertIsNotNone(sut._get_state(mock_scope_2))
+                self.assertIs(mock_scope_2, sut._get_state(mock_scope_2_id).scope)
 
             with self.assertRaises(JobException) as e:
                 _ = sut._get_state(mock_scope_2)
-            self.assertEqual("No state found for scope 'scope_2'", str(e.exception))
+            self.assertEqual("No state found for scope 'Stage scope_2'", str(e.exception))
 
         with self.assertRaises(JobException):
             _ = sut._get_state(None)
@@ -151,6 +158,26 @@ class TestJobContextImpl(TestCase):
                 self.assertEqual((mock_scope_1, mock_scope_2), sut.scopes)
             self.assertEqual((mock_scope_1,), sut.scopes)
         self.assertEqual(tuple(), sut.scopes)
+
+    def test_get_scope(self) -> None:
+        class StubScopeID:
+            def __init__(self, id):
+                self.id = id
+
+        mock_scope_1 = StubScope("scope_1", 1)
+        mock_scope_1_id = StubScopeID(id=mock_scope_1.id)
+
+        mock_scope_2 = StubScope("scope_2", 1)
+        mock_scope_3_id = StubScopeID(id="scope_3")
+
+        sut = JobContextImpl()
+        with sut.in_scope(mock_scope_1):
+
+            self.assertIs(sut.get_scope(mock_scope_1_id), mock_scope_1)
+            self.assertIs(sut.get_scope(mock_scope_2), mock_scope_2)
+            with self.assertRaises(JobException) as e:
+                sut.get_scope(mock_scope_3_id)
+            self.assertEqual("Scope with ID 'scope_3' is not known to this context.", str(e.exception))
 
     def test_error(self):
         self.assertEqual("JobException('Foo')", repr(JobContextImpl().error("Foo")))

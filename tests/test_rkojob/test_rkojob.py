@@ -16,6 +16,7 @@ from rkojob import (
     ValueKey,
     assign_value,
     context_value,
+    create_scope_id,
     job_always,
     job_failing,
     job_never,
@@ -39,6 +40,12 @@ class TestJobException(TestCase):
             raise JobException("error")
         except JobException as e:
             self.assertEqual("error", str(e))
+
+
+class TestCreateScopeId(TestCase):
+    def test(self) -> None:
+        self.assertEqual(36, len(create_scope_id()))
+        self.assertNotEqual(create_scope_id(), create_scope_id())
 
 
 class TestJobBaseStatus(TestCase):

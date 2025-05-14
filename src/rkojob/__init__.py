@@ -22,6 +22,7 @@ from typing import (
     overload,
     runtime_checkable,
 )
+from uuid import uuid4
 
 from rkojob.delegates import delegate
 from rkojob.values import (
@@ -263,7 +264,7 @@ class JobContext(Protocol):
     def scope(self) -> JobScope: ...
     @property
     def scopes(self) -> Tuple[JobScope, ...]: ...
-
+    def get_scope(self, scope_id: JobScopeID) -> JobScope: ...
     def error(self, error: str | Exception) -> Exception: ...
 
     """
@@ -273,12 +274,12 @@ class JobContext(Protocol):
     :returns: The exception instance or the error message as an exception.
     """
 
-    def get_errors(self, scope: JobScope | None = None) -> list[Exception]: ...
+    def get_errors(self, scope: JobScopeID | None = None) -> list[Exception]: ...
     @property
     def values(self) -> Values: ...
     @property
     def status(self) -> JobStatusCollector: ...
-    def get_scope_status(self, scope: JobScope) -> JobScopeStatus: ...
+    def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
 
     """
     Return exceptions recorded for *scope* or for *all* scopes if omitted.
@@ -286,6 +287,23 @@ class JobContext(Protocol):
     :param scope: Scope to return exceptions for, or ``None`` to get all exceptions.
     :returns: List of recorded exceptions.
     """
+
+
+def create_scope_id() -> str:
+    """
+    Creates a new, unique scope ID value.
+    """
+    return str(uuid4())
+
+
+@runtime_checkable
+class JobScopeID(Protocol):
+    """
+    Provides a unique ID for a scope.
+    """
+
+    @property
+    def id(self) -> str: ...
 
 
 class JobScopeType(Protocol):
@@ -298,7 +316,8 @@ class JobScopeType(Protocol):
     def value(self) -> int: ...
 
 
-class JobScope(Protocol):
+@runtime_checkable
+class JobScope(JobScopeID, Protocol):
     """Logical unit of work executed as part of a job."""
 
     @property
@@ -616,12 +635,12 @@ job_succeeding = _JobScopeCondition(lambda context: bool(not context.get_errors(
 """Scope condition that returns ``True`` if *no* errors have been recorded."""
 
 
-def scope_failing(scope: JobScope) -> JobCallable[JobConditionalValueType]:
+def scope_failing(scope: JobScopeID) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if errors have been recorded for the provided `scope`."""
     return _JobScopeCondition(lambda context: bool(context.get_errors(scope)), f"{scope} has failures.")
 
 
-def scope_succeeding(scope: JobScope) -> JobCallable[JobConditionalValueType]:
+def scope_succeeding(scope: JobScopeID) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if *no* errors have been recorded for the provided `scope`."""
     return _JobScopeCondition(lambda context: bool(not context.get_errors(scope)), f"{scope} is succeeding.")
 

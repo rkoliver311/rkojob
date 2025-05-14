@@ -16,7 +16,9 @@ from rkojob import (
     JobConditionalType,
     JobContext,
     JobException,
+    JobScopeID,
     JobScopeType,
+    create_scope_id,
     resolve_map,
     resolve_values,
 )
@@ -102,7 +104,23 @@ class JobScopes(Enum):
 A = TypeVar("A", bound=JobCallable[None])
 
 
-class JobStep(Generic[A]):
+class JobScopeIDMixin(JobScopeID):
+    _id: str
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, JobScopeID):
+            return self.id == other.id
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+
+class JobStep(JobScopeIDMixin, Generic[A]):
     """
     Class representing a job step.
     """
@@ -114,6 +132,7 @@ class JobStep(Generic[A]):
         teardown: JobCallable[None] | None = None,
         run_if: JobConditionalType | None = None,
         skip_if: JobConditionalType | None = None,
+        id: str | None = None,
     ) -> None:
         self._name: str = name
 
@@ -121,6 +140,7 @@ class JobStep(Generic[A]):
         self._teardown: JobCallable[None] | None = None
         self._run_if: JobConditionalType | None = run_if
         self._skip_if: JobConditionalType | None = skip_if
+        self._id = id or create_scope_id()
 
         if action:
             self.action = action
@@ -176,16 +196,17 @@ class JobStep(Generic[A]):
         return f"{self.type} {self.name}"
 
 
-class JobStage:
+class JobStage(JobScopeIDMixin):
     """
     Class representing a job stage that consists of one or more steps.
     """
 
-    def __init__(self, name: str, steps: list[JobStep] | None = None) -> None:
+    def __init__(self, name: str, steps: list[JobStep] | None = None, id: str | None = None) -> None:
         self._name: str = name
         if steps is None:
             steps = []
         self.steps: list[JobStep] = steps
+        self._id: str = id or create_scope_id()
 
     @property
     def name(self) -> str:
@@ -203,16 +224,17 @@ class JobStage:
         return f"{self.type} {self.name}"
 
 
-class Job:
+class Job(JobScopeIDMixin):
     """
     Class representing a job that consists of one or more stages.
     """
 
-    def __init__(self, name: str, stages: list[JobStage] | None = None) -> None:
+    def __init__(self, name: str, stages: list[JobStage] | None = None, id: str | None = None) -> None:
         self._name: str = name
         if stages is None:
             stages = []
         self.stages: list[JobStage] = stages
+        self._id: str = id or create_scope_id()
 
     @property
     def name(self) -> str:
@@ -230,25 +252,56 @@ class Job:
         return f"{self.type} {self.name}"
 
 
-class JobStageBuilder:
+class JobStepBuilder(JobScopeIDMixin):
+    def __init__(self, name: str) -> None:
+        self._name: str = name
+        self.action: JobCallable[None] | None = None
+        self.teardown: JobCallable[None] | None = None
+        self.run_if: JobConditionalType | None = None
+        self.skip_if: JobConditionalType | None = None
+        self._id: str = create_scope_id()
+        self.builds_type: JobScopeType = JobScopes.STEP
+
+    def build(self) -> JobStep:
+        return JobStep(
+            name=self._name,
+            action=self.action,
+            teardown=self.teardown,
+            run_if=self.run_if,
+            skip_if=self.skip_if,
+            id=self._id,
+        )
+
+    def __str__(self) -> str:
+        return f"{self.builds_type} {self._name}"
+
+
+class JobStageBuilder(JobScopeIDMixin):
     def __init__(self, name: str) -> None:
         self._name: str = name
         self._steps: list[JobStep] = []
+        self._id: str = create_scope_id()
+        self.builds_type: JobScopeType = JobScopes.STAGE
 
     @contextmanager
-    def step(self, name: str) -> Generator[JobStep, None, None]:
-        step: JobStep = JobStep(name)
-        yield step
-        self._steps.append(step)
+    def step(self, name: str) -> Generator[JobStepBuilder, None, None]:
+        builder: JobStepBuilder = JobStepBuilder(name)
+        yield builder
+        self._steps.append(builder.build())
 
     def build(self) -> JobStage:
-        return JobStage(name=self._name, steps=self._steps)
+        return JobStage(name=self._name, steps=self._steps, id=self._id)
+
+    def __str__(self) -> str:
+        return f"{self.builds_type} {self._name}"
 
 
-class JobBuilder(AbstractContextManager):
+class JobBuilder(JobScopeIDMixin, AbstractContextManager):
     def __init__(self, name: str) -> None:
         self._name: str = name
         self._stages: list[JobStage] = []
+        self._id: str = create_scope_id()
+        self.builds_type: JobScopeType = JobScopes.JOB
 
     def __exit__(self, exc_type, exc_value, traceback, /):
         pass
@@ -260,4 +313,7 @@ class JobBuilder(AbstractContextManager):
         self._stages.append(builder.build())
 
     def build(self) -> Job:
-        return Job(name=self._name, stages=self._stages)
+        return Job(name=self._name, stages=self._stages, id=self._id)
+
+    def __str__(self) -> str:
+        return f"{self.builds_type} {self._name}"

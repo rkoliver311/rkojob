@@ -12,16 +12,19 @@ from rkojob import (
     ValueKey,
     ValueRef,
     Values,
+    scope_failing,
 )
 from rkojob.factories import JobContextFactory
 from rkojob.job import (
     Job,
     JobBaseAction,
     JobBuilder,
+    JobScopeIDMixin,
     JobScopes,
     JobStage,
     JobStageBuilder,
     JobStep,
+    JobStepBuilder,
     lazy_action,
 )
 
@@ -91,6 +94,33 @@ class TestJobBaseAction(TestCase):
         self.assertEqual(["teardown_job"], sut.side_effects)
 
 
+class TestJobScopeIDMixin(TestCase):
+    def test_eq_hash(self) -> None:
+        class Foo(JobScopeIDMixin):
+            def __init__(self, data, id):
+                self.data = data
+                self._id = id
+
+        class Bar(JobScopeIDMixin):
+            def __init__(self, num, id):
+                self.num = num
+                self._id = id
+
+        class Baz:
+            def __init__(self, num, id):
+                self.num = num
+                self._id = id
+
+        foo = Foo({"some": "data"}, "123")
+        bar = Bar(456, "123")
+        self.assertEqual(foo, bar)
+        self.assertEqual(hash(foo), hash(bar))
+
+        baz = Baz(456, "123")
+        self.assertNotEqual(bar, baz)
+        self.assertNotEqual(hash(bar), hash(baz))
+
+
 class BarAction(JobBaseAction):
     def __init__(self, arg1: str, arg2: int, arg3: float = 1.0, arg4: bool = False) -> None:
         super().__init__()
@@ -101,6 +131,10 @@ class BarAction(JobBaseAction):
 
 
 class TestJobStep(TestCase):
+    def test_id(self):
+        self.assertEqual("scope_id", JobStep("name", id="scope_id").id)
+        self.assertIsNotNone(JobStep("name", id=None).id)
+
     def test_name(self):
         self.assertEqual("name", JobStep("name").name)
 
@@ -159,6 +193,10 @@ class TestJobStage(TestCase):
         self.assertEqual("step1", sut.steps[0].name)
         self.assertEqual("step2", sut.steps[1].name)
 
+    def test_id(self):
+        self.assertEqual("scope_id", JobStage("name", id="scope_id").id)
+        self.assertIsNotNone(JobStage("name", id=None).id)
+
     def test_str(self) -> None:
         self.assertEqual("Stage name", str(JobStage("name")))
 
@@ -177,8 +215,46 @@ class TestJob(TestCase):
         self.assertEqual("job", sut.name)
         self.assertEqual([], sut.stages)
 
+    def test_id(self):
+        self.assertEqual("scope_id", Job("name", id="scope_id").id)
+        self.assertIsNotNone(Job("name", id=None).id)
+
     def test_str(self) -> None:
         self.assertEqual("Job name", str(Job("name")))
+
+
+class TestJobStepBuilder(TestCase):
+    def test(self):
+        mock_action = MagicMock()
+        # mock_teardown = MagicMock()
+        mock_run_if = MagicMock()
+        mock_skip_if = MagicMock()
+
+        sut = JobStepBuilder("step")
+        sut.action = mock_action
+        # sut.teardown = mock_teardown
+        sut.run_if = mock_run_if
+        sut.skip_if = mock_skip_if
+
+        step = sut.build()
+        self.assertEqual("step", step.name)
+        self.assertIs(sut.action, step.action)
+        # self.assertIs(mock_teardown, step.teardown)
+        self.assertIs(sut.run_if, step.run_if)
+        self.assertIs(sut.skip_if, step.skip_if)
+        self.assertEqual(sut.id, step.id)
+
+    def test_builder_as_scope_id(self) -> None:
+        context: JobContext = JobContextFactory.create()
+        sut = JobStepBuilder("step")
+        condition = scope_failing(sut)
+        scope = sut.build()
+        with context.in_scope(scope), context.status.scope(scope):
+            context.error("boom")
+        self.assertEqual((True, "Step step has failures."), condition(context))
+
+    def test_str(self) -> None:
+        self.assertEqual(str(JobStep("name")), str(JobStepBuilder("name")))
 
 
 class TestJobStageBuilder(TestCase):
@@ -196,12 +272,17 @@ class TestJobStageBuilder(TestCase):
             step3.action = mock_action3
         stage = sut.build()
         self.assertEqual("stage", stage.name)
+        self.assertEqual(sut.id, stage.id)
+
         self.assertEqual("step1", stage.steps[0].name)
         self.assertIs(mock_action1, stage.steps[0].action)
         self.assertEqual("step2", stage.steps[1].name)
         self.assertIs(mock_action2, stage.steps[1].action)
         self.assertEqual("step3", stage.steps[2].name)
         self.assertIs(mock_action3, stage.steps[2].action)
+
+    def test_str(self) -> None:
+        self.assertEqual(str(JobStage("name")), str(JobStageBuilder("name")))
 
 
 class TestJobBuilder(TestCase):
@@ -222,6 +303,7 @@ class TestJobBuilder(TestCase):
                     step3_1.action = mock_action3_1
         job = sut.build()
         self.assertEqual("job", job.name)
+        self.assertEqual(sut.id, job.id)
 
         self.assertEqual("stage1", job.stages[0].name)
         self.assertEqual("step1.1", job.stages[0].steps[0].name)
@@ -248,6 +330,9 @@ class TestJobBuilder(TestCase):
                     pass
         job = sut.build()
         self.assertEqual("step1.2", job.stages[0].steps[0].name)
+
+    def test_str(self) -> None:
+        self.assertEqual(str(Job("name")), str(JobBuilder("name")))
 
 
 class TestDeferredInit(TestCase):
