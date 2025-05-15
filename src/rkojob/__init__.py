@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -14,8 +15,10 @@ from typing import (
     Callable,
     Generator,
     Generic,
+    ParamSpec,
     Protocol,
     Tuple,
+    Type,
     TypeAlias,
     TypeVar,
     cast,
@@ -688,16 +691,17 @@ class JobTeardownScope(JobScope, Protocol):
     def teardown(self, context: JobContext): ...
 
 
-@runtime_checkable
-class JobAction(JobCallable[None], Protocol):
+class JobAction(JobCallable[None], ABC):
     """
     A class that performs an action and an optional teardown action.
     Used when an *action* and a *teardown* need to share state.
     """
 
-    def action(self, context: JobContext) -> None: ...
+    def __call__(self, context: JobContext) -> None:
+        self.action(context)
 
-    def teardown(self, context: JobContext) -> None: ...
+    @abstractmethod
+    def action(self, context: JobContext) -> None: ...
 
 
 class JobRunner(Protocol):
@@ -719,3 +723,56 @@ class JobRunner(Protocol):
     """
 
     def run(self, context: JobContext, scope: JobScope) -> None: ...
+
+
+class job_action(JobAction):
+    def __init__(self, action: JobCallable[None]) -> None:
+        """
+        Wrap a `JobCallable[None]` in a `JobAction` instance.
+
+        :param action: The `JobCallable[None]` to wrap.
+        """
+        self._action: JobCallable[None] = action
+
+    def action(self, context: JobContext) -> None:
+        self._action(context)
+
+    def __repr__(self) -> str:
+        return f"job_action({self._action!r})"
+
+
+R = TypeVar("R")
+P = ParamSpec("P")
+A = TypeVar("A", bound=JobAction)
+
+
+class lazy_action(JobAction, Generic[A]):
+    def __init__(self, action_type: Type[A], *args, **kwargs) -> None:
+        """
+        Defer the instantiation of a `JobAction` instance so that it's `__init__` args
+        can be resolved using the *context* at the time of execution. `JobAction` implementations
+        that perform their own argument resolution do not need to be lazily initialized.
+
+        :param action_type: The type of action to instantiate.
+        :param args: The positional arguments of the action's `__init__` method.
+        :param kwargs: The keyword arguments of the action's `__init__` method.
+        """
+        super().__init__()
+        self._action_type: Type[A] = action_type
+        self._args: tuple[Any, ...] = args
+        self._kwargs: dict[str, Any] = kwargs
+        self._action_instance: A | None = None
+
+    def _get_action_instance(self, context: JobContext) -> A:
+        if self._action_instance is None:
+            self._action_instance = self._action_type(
+                *resolve_values(self._args, context=context),
+                **resolve_map(self._kwargs, context=context),
+            )
+        return self._action_instance
+
+    def action(self, context: JobContext) -> None:
+        self._get_action_instance(context).action(context)
+
+    def __repr__(self) -> str:
+        return f"lazy_action({self._action_type.__name__})"

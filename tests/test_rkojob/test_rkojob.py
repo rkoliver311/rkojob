@@ -7,6 +7,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import (
+    JobAction,
     JobBaseStatus,
     JobCallable,
     JobContext,
@@ -17,10 +18,12 @@ from rkojob import (
     assign_value,
     context_value,
     create_scope_id,
+    job_action,
     job_always,
     job_failing,
     job_never,
     job_succeeding,
+    lazy_action,
     lazy_format,
     resolve_map,
     resolve_value,
@@ -528,3 +531,62 @@ class TestJobScopeCondition(TestCase):
 
         self.assertEqual((True, "Scope is succeeding."), sut(mock_context))
         mock_context.get_errors.assert_called_with(mock_scope)
+
+
+class TestJobAction(TestCase):
+    def test(self) -> None:
+        mock_action = MagicMock()
+        sut = job_action(mock_action)
+        self.assertIsInstance(sut, JobAction)
+        sut(MagicMock())
+        mock_action.assert_called_once()
+
+    def test_repr(self) -> None:
+        mock_action = MagicMock()
+        self.assertEqual(f"job_action({mock_action!r})", repr(job_action(mock_action)))
+
+
+class FooAction(JobAction):
+    def __init__(self, side_effects: list[str] | None = None, foo: str | None = None) -> None:
+        super().__init__()
+        if side_effects is None:
+            side_effects = []
+        self.side_effects: list[str] = side_effects
+        self.foo = foo
+
+    def action(self, context: JobContext) -> None:
+        self.side_effects.append("action")
+
+
+class TestLazyAction(TestCase):
+    def test(self) -> None:
+        class StubScope:
+            def __init__(self, name, type):
+                self.name = name
+                self.type = type
+
+        sut = lazy_action(FooAction, ["foo"], foo="foo")
+        action_instance = sut._get_action_instance(MagicMock())  # type: ignore[attr-defined]
+        self.assertEqual(["foo"], action_instance.side_effects)
+        self.assertEqual("foo", action_instance.foo)
+        sut.action(MagicMock())  # type: ignore[attr-defined]
+        self.assertEqual(["foo", "action"], action_instance.side_effects)
+
+    def test_values_key(self) -> None:
+        values: Values = Values()
+        values.set("foo_key", ["foo"])
+        values.set("bar_key", "bar")
+        mock_context = MagicMock(values=values)
+
+        sut = lazy_action(FooAction, ValueKey[str]("foo_key"), foo=ValueKey[str]("bar_key"))
+        action_instance = sut._get_action_instance(mock_context)  # type: ignore[attr-defined]
+        self.assertEqual(["foo"], action_instance.side_effects)
+        self.assertEqual("bar", action_instance.foo)
+        sut.action(MagicMock())  # type: ignore[attr-defined]
+        self.assertEqual(["foo", "action"], action_instance.side_effects)
+
+    def test_repr(self) -> None:
+        self.assertEqual(
+            "lazy_action(FooAction)",
+            repr(lazy_action(FooAction, ValueKey[str]("foo_key"), foo=ValueKey[str]("bar_key"))),
+        )
