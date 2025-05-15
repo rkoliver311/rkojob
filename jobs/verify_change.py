@@ -4,11 +4,9 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 # Dog-fooding: verify-change job
-from rkojob import context_value, lazy_format
+from rkojob import context_value, lazy_action, lazy_format
 from rkojob.actions import VerifyTestStructure, ToolActionBuilder
-from rkojob.job import (
-    lazy_action, JobBuilder,
-)
+from rkojob.job import JobBuilder
 
 tox = ToolActionBuilder("tox")
 

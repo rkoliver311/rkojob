@@ -5,89 +5,20 @@
 
 from __future__ import annotations
 
-from abc import ABC
 from contextlib import AbstractContextManager, contextmanager
 from enum import Enum, auto
-from typing import Generator, Generic, ParamSpec, Type, TypeVar, cast
+from typing import Generator, Generic, TypeVar
 
 from rkojob import (
-    JobAction,
+    Delegate,
     JobCallable,
     JobConditionalType,
     JobContext,
-    JobException,
     JobScopeID,
     JobScopeType,
     create_scope_id,
-    resolve_map,
-    resolve_values,
+    delegate,
 )
-
-
-class JobBaseAction(ABC, JobAction):
-    def __call__(self, context: JobContext) -> None:
-        return self.action(context)
-
-    def action(self, context: JobContext) -> None:  # pragma: no cover
-        pass
-
-    def teardown_step(self, context: JobContext) -> None:  # pragma: no cover
-        pass
-
-    def teardown_stage(self, context: JobContext) -> None:  # pragma: no cover
-        pass
-
-    def teardown_job(self, context: JobContext) -> None:  # pragma: no cover
-        pass
-
-    def teardown(self, context: JobContext) -> None:
-        match context.scope.type:
-            case JobScopes.STEP:
-                self.teardown_step(context)
-            case JobScopes.STAGE:
-                self.teardown_stage(context)
-            case JobScopes.JOB:
-                self.teardown_job(context)
-            case unknown_scope:
-                raise JobException(f"Unknown scope type: {unknown_scope}")
-
-
-R = TypeVar("R")
-P = ParamSpec("P")
-
-
-def lazy_action(action_type: Type[JobAction], *args, **kwargs) -> JobCallable[None]:
-    """
-    Defer the instantiation of a `JobAction` instance so that it's `__init__` args
-    can be resolved using the *context* at the time of execution. `JobAction` implementations
-    that perform their own argument resolution do not need to be lazily initialized.
-
-    :param action_type: The type of action to instantiate.
-    :param args: The positional arguments of the action's `__init__` method.
-    :param kwargs: The keyword arguments of the action's `__init__` method.
-    :returns: A `JobAction` instance that wraps *action_type* and will initialize it at the time of execution.
-    """
-
-    class _Wrapper(JobBaseAction):
-        def __init__(self) -> None:
-            super().__init__()
-            self._action_instance: JobAction | None = None
-
-        def _get_action_instance(self, context: JobContext) -> JobAction:
-            if self._action_instance is None:
-                self._action_instance = action_type(
-                    *resolve_values(args, context=context),
-                    **resolve_map(kwargs, context=context),
-                )
-            return self._action_instance
-
-        def action(self, context: JobContext) -> None:
-            self._get_action_instance(context).action(context)
-
-        def teardown(self, context: JobContext) -> None:
-            self._get_action_instance(context).teardown(context)
-
-    return _Wrapper()
 
 
 class JobScopes(Enum):
@@ -129,7 +60,6 @@ class JobStep(JobScopeIDMixin, Generic[A]):
         self,
         name: str,
         action: A | None = None,
-        teardown: JobCallable[None] | None = None,
         run_if: JobConditionalType | None = None,
         skip_if: JobConditionalType | None = None,
         id: str | None = None,
@@ -137,15 +67,12 @@ class JobStep(JobScopeIDMixin, Generic[A]):
         self._name: str = name
 
         self._action: A | None = None
-        self._teardown: JobCallable[None] | None = None
         self._run_if: JobConditionalType | None = run_if
         self._skip_if: JobConditionalType | None = skip_if
         self._id = id or create_scope_id()
 
         if action:
             self.action = action
-        if teardown:
-            self.teardown = teardown
 
     @property
     def name(self) -> str:
@@ -163,18 +90,8 @@ class JobStep(JobScopeIDMixin, Generic[A]):
     def action(self, action: A | None) -> None:
         self._action = action
 
-    @property
-    def teardown(self) -> JobCallable[None] | None:
-        if self._teardown is None:
-            if isinstance(self.action, JobAction):
-                self._teardown = cast(JobAction, self.action).teardown
-        return self._teardown
-
-    @teardown.setter
-    def teardown(self, teardown: JobCallable[None] | None) -> None:
-        if isinstance(self.action, JobAction):
-            raise ValueError("Cannot specify teardown when action is JobAction")
-        self._teardown = teardown
+    @delegate(continue_on_error=True)
+    def teardown(self, context: JobContext) -> None: ...
 
     @property
     def run_if(self) -> JobConditionalType | None:
@@ -220,6 +137,9 @@ class JobStage(JobScopeIDMixin):
     def scopes(self) -> list[JobStep]:
         return self.steps
 
+    @delegate(continue_on_error=True)
+    def teardown(self, context: JobContext) -> None: ...
+
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
@@ -248,6 +168,9 @@ class Job(JobScopeIDMixin):
     def scopes(self) -> list[JobStage]:
         return self.stages
 
+    @delegate(continue_on_error=True)
+    def teardown(self, context: JobContext) -> None: ...
+
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
@@ -256,21 +179,22 @@ class JobStepBuilder(JobScopeIDMixin):
     def __init__(self, name: str) -> None:
         self._name: str = name
         self.action: JobCallable[None] | None = None
-        self.teardown: JobCallable[None] | None = None
+        self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.run_if: JobConditionalType | None = None
         self.skip_if: JobConditionalType | None = None
         self._id: str = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.STEP
 
     def build(self) -> JobStep:
-        return JobStep(
+        step: JobStep = JobStep(
             name=self._name,
             action=self.action,
-            teardown=self.teardown,
             run_if=self.run_if,
             skip_if=self.skip_if,
             id=self._id,
         )
+        step.teardown += self.teardown
+        return step
 
     def __str__(self) -> str:
         return f"{self.builds_type} {self._name}"
@@ -280,6 +204,7 @@ class JobStageBuilder(JobScopeIDMixin):
     def __init__(self, name: str) -> None:
         self._name: str = name
         self._steps: list[JobStep] = []
+        self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self._id: str = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.STAGE
 
@@ -290,7 +215,9 @@ class JobStageBuilder(JobScopeIDMixin):
         self._steps.append(builder.build())
 
     def build(self) -> JobStage:
-        return JobStage(name=self._name, steps=self._steps, id=self._id)
+        stage: JobStage = JobStage(name=self._name, steps=self._steps, id=self._id)
+        stage.teardown += self.teardown
+        return stage
 
     def __str__(self) -> str:
         return f"{self.builds_type} {self._name}"
@@ -300,6 +227,7 @@ class JobBuilder(JobScopeIDMixin, AbstractContextManager):
     def __init__(self, name: str) -> None:
         self._name: str = name
         self._stages: list[JobStage] = []
+        self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self._id: str = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.JOB
 
@@ -313,7 +241,9 @@ class JobBuilder(JobScopeIDMixin, AbstractContextManager):
         self._stages.append(builder.build())
 
     def build(self) -> Job:
-        return Job(name=self._name, stages=self._stages, id=self._id)
+        job: Job = Job(name=self._name, stages=self._stages, id=self._id)
+        job.teardown += self.teardown
+        return job
 
     def __str__(self) -> str:
         return f"{self.builds_type} {self._name}"

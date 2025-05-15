@@ -7,29 +7,25 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import (
+    JobAction,
     JobContext,
     JobException,
-    ValueKey,
     ValueRef,
-    Values,
     scope_failing,
 )
 from rkojob.factories import JobContextFactory
 from rkojob.job import (
     Job,
-    JobBaseAction,
     JobBuilder,
     JobScopeIDMixin,
-    JobScopes,
     JobStage,
     JobStageBuilder,
     JobStep,
     JobStepBuilder,
-    lazy_action,
 )
 
 
-class FooAction(JobBaseAction):
+class FooAction(JobAction):
     def __init__(self, side_effects: list[str] | None = None, foo: str | None = None) -> None:
         super().__init__()
         if side_effects is None:
@@ -39,59 +35,6 @@ class FooAction(JobBaseAction):
 
     def action(self, context: JobContext) -> None:
         self.side_effects.append("action")
-
-    def teardown_step(self, context: JobContext) -> None:
-        self.side_effects.append("teardown_step")
-
-    def teardown_stage(self, context: JobContext) -> None:
-        self.side_effects.append("teardown_stage")
-
-    def teardown_job(self, context: JobContext) -> None:
-        self.side_effects.append("teardown_job")
-
-
-class TestJobBaseAction(TestCase):
-    def test_call(self):
-        sut = FooAction()
-        # Use __call__
-        sut(MagicMock())
-        self.assertEqual(["action"], sut.side_effects)
-
-    def test_action(self):
-        sut = FooAction()
-        sut.action(MagicMock())
-        self.assertEqual(["action"], sut.side_effects)
-
-    def test_teardown(self):
-        sut = FooAction()
-        sut.teardown(MagicMock(scope=MagicMock(type=JobScopes.STEP)))
-        sut.teardown(MagicMock(scope=MagicMock(type=JobScopes.STAGE)))
-        sut.teardown(MagicMock(scope=MagicMock(type=JobScopes.JOB)))
-        self.assertEqual(["teardown_step", "teardown_stage", "teardown_job"], sut.side_effects)
-
-    def test_teardown_negative(self):
-        sut = FooAction()
-        unknown_scope = MagicMock()
-        context = JobContextFactory.create()
-        with context.in_scope(unknown_scope):
-            with self.assertRaises(JobException) as e:
-                sut.teardown(context)
-        self.assertEqual(f"Unknown scope type: {unknown_scope.type}", str(e.exception))
-
-    def test_teardown_step(self):
-        sut = FooAction()
-        sut.teardown_step(MagicMock())
-        self.assertEqual(["teardown_step"], sut.side_effects)
-
-    def test_teardown_stage(self):
-        sut = FooAction()
-        sut.teardown_stage(MagicMock())
-        self.assertEqual(["teardown_stage"], sut.side_effects)
-
-    def test_teardown_job(self):
-        sut = FooAction()
-        sut.teardown_job(MagicMock())
-        self.assertEqual(["teardown_job"], sut.side_effects)
 
 
 class TestJobScopeIDMixin(TestCase):
@@ -121,13 +64,16 @@ class TestJobScopeIDMixin(TestCase):
         self.assertNotEqual(hash(bar), hash(baz))
 
 
-class BarAction(JobBaseAction):
+class BarAction(JobAction):
     def __init__(self, arg1: str, arg2: int, arg3: float = 1.0, arg4: bool = False) -> None:
         super().__init__()
         self.arg1 = arg1
         self.arg2 = arg2
         self.arg3 = arg3
         self.arg4 = arg4
+
+    def action(self, context: JobContext) -> None:
+        pass
 
 
 class TestJobStep(TestCase):
@@ -143,26 +89,23 @@ class TestJobStep(TestCase):
         self.assertIs(mock_action, JobStep("name", action=mock_action).action)
 
     def test_teardown(self):
+        sut = JobStep("name")
         mock_teardown = MagicMock()
-        self.assertIs(mock_teardown, JobStep("name", teardown=mock_teardown).teardown)
+        mock_context = MagicMock()
+        sut.teardown += mock_teardown
+        sut.teardown(mock_context)
+        mock_teardown.assert_called_once_with(mock_context)
 
     def test_action_instance(self):
         action = FooAction()
         sut = JobStep[FooAction]("name", action=action)
         self.assertIs(action, sut.action)
-        self.assertEqual(action.teardown, sut.teardown)
 
     def test_action_instance_2(self):
         action = FooAction()
         sut = JobStep[FooAction]("name")
         sut.action = action
         self.assertEqual(action, sut.action)
-        self.assertEqual(action.teardown, sut.teardown)
-
-    def test_action_instance_negative(self):
-        with self.assertRaises(ValueError) as e:
-            _ = JobStep("step", action=FooAction(), teardown=MagicMock())
-        self.assertEqual("Cannot specify teardown when action is JobAction", str(e.exception))
 
     def test_skip_if(self) -> None:
         skip_if = ValueRef(True)
@@ -226,20 +169,23 @@ class TestJob(TestCase):
 class TestJobStepBuilder(TestCase):
     def test(self):
         mock_action = MagicMock()
-        # mock_teardown = MagicMock()
+        mock_teardown1 = MagicMock()
+        mock_teardown2 = MagicMock()
         mock_run_if = MagicMock()
         mock_skip_if = MagicMock()
 
         sut = JobStepBuilder("step")
         sut.action = mock_action
-        # sut.teardown = mock_teardown
+        sut.teardown += mock_teardown1
+        sut.teardown += mock_teardown2
         sut.run_if = mock_run_if
         sut.skip_if = mock_skip_if
 
         step = sut.build()
         self.assertEqual("step", step.name)
         self.assertIs(sut.action, step.action)
-        # self.assertIs(mock_teardown, step.teardown)
+        self.assertIn(mock_teardown1, step.teardown)
+        self.assertIn(mock_teardown2, step.teardown)
         self.assertIs(sut.run_if, step.run_if)
         self.assertIs(sut.skip_if, step.skip_if)
         self.assertEqual(sut.id, step.id)
@@ -262,7 +208,8 @@ class TestJobStageBuilder(TestCase):
         mock_action1 = MagicMock()
         mock_action2 = MagicMock()
         mock_action3 = MagicMock()
-
+        mock_teardown1 = MagicMock()
+        mock_teardown2 = MagicMock()
         sut = JobStageBuilder("stage")
         with sut.step("step1") as step1:
             step1.action = mock_action1
@@ -270,10 +217,13 @@ class TestJobStageBuilder(TestCase):
             step2.action = mock_action2
         with sut.step("step3") as step3:
             step3.action = mock_action3
+        sut.teardown += mock_teardown1
+        sut.teardown += mock_teardown2
         stage = sut.build()
         self.assertEqual("stage", stage.name)
         self.assertEqual(sut.id, stage.id)
-
+        self.assertIn(mock_teardown1, stage.teardown)
+        self.assertIn(mock_teardown2, stage.teardown)
         self.assertEqual("step1", stage.steps[0].name)
         self.assertIs(mock_action1, stage.steps[0].action)
         self.assertEqual("step2", stage.steps[1].name)
@@ -290,6 +240,8 @@ class TestJobBuilder(TestCase):
         mock_action1_1 = MagicMock()
         mock_action2_1 = MagicMock()
         mock_action3_1 = MagicMock()
+        mock_teardown1 = MagicMock()
+        mock_teardown2 = MagicMock()
 
         with JobBuilder("job") as sut:
             with sut.stage("stage1") as stage1:
@@ -301,9 +253,14 @@ class TestJobBuilder(TestCase):
             with sut.stage("stage3") as stage3:
                 with stage3.step("step3.1") as step3_1:
                     step3_1.action = mock_action3_1
+        sut.teardown += mock_teardown1
+        sut.teardown += mock_teardown2
+
         job = sut.build()
         self.assertEqual("job", job.name)
         self.assertEqual(sut.id, job.id)
+        self.assertIn(mock_teardown1, job.teardown)
+        self.assertIn(mock_teardown2, job.teardown)
 
         self.assertEqual("stage1", job.stages[0].name)
         self.assertEqual("step1.1", job.stages[0].steps[0].name)
@@ -333,40 +290,3 @@ class TestJobBuilder(TestCase):
 
     def test_str(self) -> None:
         self.assertEqual(str(Job("name")), str(JobBuilder("name")))
-
-
-class TestDeferredInit(TestCase):
-    def test(self) -> None:
-        class StubScope:
-            def __init__(self, name, type):
-                self.name = name
-                self.type = type
-
-        sut = lazy_action(FooAction, ["foo"], foo="foo")
-        action_instance = sut._get_action_instance(MagicMock())  # type: ignore[attr-defined]
-        self.assertEqual(["foo"], action_instance.side_effects)
-        self.assertEqual("foo", action_instance.foo)
-        sut.action(MagicMock())  # type: ignore[attr-defined]
-        self.assertEqual(["foo", "action"], action_instance.side_effects)
-        sut.teardown(MagicMock(scope=StubScope("scope", JobScopes.JOB)))  # type: ignore[attr-defined]
-        self.assertEqual(["foo", "action", "teardown_job"], action_instance.side_effects)
-
-    def test_values_key(self) -> None:
-        class StubScope:
-            def __init__(self, name, type):
-                self.name = name
-                self.type = type
-
-        values: Values = Values()
-        values.set("foo_key", ["foo"])
-        values.set("bar_key", "bar")
-        mock_context = MagicMock(values=values)
-
-        sut = lazy_action(FooAction, ValueKey[str]("foo_key"), foo=ValueKey[str]("bar_key"))
-        action_instance = sut._get_action_instance(mock_context)  # type: ignore[attr-defined]
-        self.assertEqual(["foo"], action_instance.side_effects)
-        self.assertEqual("bar", action_instance.foo)
-        sut.action(MagicMock())  # type: ignore[attr-defined]
-        self.assertEqual(["foo", "action"], action_instance.side_effects)
-        sut.teardown(MagicMock(scope=StubScope("scope", JobScopes.JOB)))  # type: ignore[attr-defined]
-        self.assertEqual(["foo", "action", "teardown_job"], action_instance.side_effects)

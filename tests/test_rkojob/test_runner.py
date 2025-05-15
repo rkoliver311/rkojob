@@ -7,6 +7,7 @@ from enum import Enum, auto
 from unittest import TestCase
 
 from rkojob import (
+    JobAction,
     JobCallable,
     JobContext,
     JobException,
@@ -116,6 +117,27 @@ class TestJobRunnerImpl(TestCase):
         with self.assertRaises(JobException) as e:
             JobRunnerImpl().run(JobContextFactory.create(), StubScope("name", "scope-type"))
         self.assertEqual("Unknown scope type: scope-type", str(e.exception))
+
+    def test_action_method_as_teardown(self) -> None:
+        class SomeAction(JobAction):
+            def __init__(self, side_effects: list[str]) -> None:
+                self._side_effects: list[str] = side_effects
+
+            def action(self, context: JobContext) -> None:
+                self._side_effects.append("Action!")
+                context.add_teardown(context.parent_scope(), self._clean_up)
+
+            def _clean_up(self, context: JobContext) -> None:
+                self._side_effects.append(f"Teardown {context.scope}!")
+
+        side_effects: list[str] = []
+        scope = StubActionScope("scope", StubScopeType.STEP, action=SomeAction(side_effects))
+        parent = StubGroupScope("parent", StubScopeType.STAGE, scopes=[scope])
+
+        context: JobContext = JobContextFactory.create()
+        sut = JobRunnerImpl()
+        sut.run(context, parent)
+        self.assertEqual(["Action!", f"Teardown {parent}!"], side_effects)
 
     def test_mix_of_parent_and_action(self):
         side_effects = []

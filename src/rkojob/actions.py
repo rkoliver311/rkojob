@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from rkojob import (
+    JobAction,
     JobContext,
     JobException,
     JobResolvableValue,
@@ -19,7 +20,6 @@ from rkojob import (
     unassign_value,
 )
 from rkojob.coerce import as_path
-from rkojob.job import JobBaseAction
 from rkojob.util import (
     Shell,
     ShellException,
@@ -33,10 +33,11 @@ from rkojob.values import (
 )
 
 
-class ShellAction(JobBaseAction):
+class ShellAction(JobAction):
     def __init__(
         self, *args: Any, result: ValueRef[ShellResult] | None = None, raise_on_error: bool = False, **kwargs
     ) -> None:
+        super().__init__()
         self._args: tuple[Any, ...] = args
         self._kwargs: dict[str, Any] = kwargs
         self.result: ValueRef[ShellResult] = result or ValueRef(name="result")
@@ -89,7 +90,7 @@ class ToolActionBuilder:
         )
 
 
-class VerifyTestStructure(JobBaseAction):
+class VerifyTestStructure(JobAction):
     def __init__(
         self,
         *,
