@@ -14,6 +14,7 @@ from rkojob.util import (
     ShellResult,
     ToolBuilder,
     ToolRunner,
+    deep_flatten,
     to_camel,
     to_kebab,
 )
@@ -223,3 +224,8 @@ class TestToolRunner(TestCase):
                 {"arg_one": "one", "--arg_2": "two", "a": True, "enable_arg": False, "a_list": ["a", "b", "c"]}
             ),
         )
+
+
+class TestDeepFlatten(TestCase):
+    def test(self) -> None:
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 0], list(deep_flatten([1, [2, [3, 4, 5], [6, 7], 8], 9, 0])))

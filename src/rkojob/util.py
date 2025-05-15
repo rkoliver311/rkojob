@@ -336,3 +336,11 @@ class ToolRunner:
         if len(key) == 1:
             return f"-{key}"
         return f"--{to_kebab(key)}"
+
+
+def deep_flatten(xs: Iterable[Any]) -> Iterable[Any]:
+    for x in xs:
+        if isinstance(x, Iterable) and not isinstance(x, (str, bytes)):
+            yield from deep_flatten(x)
+        else:
+            yield x

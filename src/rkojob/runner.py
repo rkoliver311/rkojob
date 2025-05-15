@@ -3,7 +3,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-from typing import cast
+from typing import Any, cast
 
 from rkojob import (
     JobActionScope,
@@ -14,12 +14,13 @@ from rkojob import (
     JobException,
     JobGroupScope,
     JobScope,
-    JobScopeStatus,
     JobTeardownScope,
     job_failing,
     job_never,
     resolve_value,
 )
+from rkojob.delegates import Delegate
+from rkojob.util import deep_flatten
 
 
 class JobRunnerImpl:
@@ -62,9 +63,7 @@ class JobRunnerImpl:
                 elif action:
                     self._run_action(context, action)
             finally:
-                if group:
-                    self._run_group_teardown(context, group)
-                elif teardown:
+                if teardown:
                     self._run_teardown(context, teardown)
 
     def _run_group(self, context: JobContext, group: JobGroupScope) -> None:
@@ -81,51 +80,18 @@ class JobRunnerImpl:
                 # Add error to current scope's list of errors
                 context.status.error(e)
 
-    def _run_group_teardown(
-        self, context: JobContext, group: JobGroupScope, *, scope_to_teardown: JobScope | None = None
-    ) -> None:
-        # Run teardowns of a group's descendants on the give scope.
-        if scope_to_teardown is None:
-            # Self-teardown
-            scope_to_teardown = group
-        child: JobScope
-        for child in reversed(group.scopes):
-            child_as_group: JobGroupScope | None = child if isinstance(child, JobGroupScope) else None
-            child_as_teardown: JobTeardownScope | None = child if isinstance(child, JobTeardownScope) else None
-            if not (child_as_group or child_as_teardown):  # pragma: no cover
-                continue
-            if child_as_group:
-                self._run_group_teardown(context, child_as_group, scope_to_teardown=scope_to_teardown)
-            elif child_as_teardown:
-                self._run_teardown(context, child_as_teardown, scope_to_teardown=scope_to_teardown)
-
-    def _run_teardown(
-        self, context: JobContext, teardown: JobTeardownScope, *, scope_to_teardown: JobScope | None = None
-    ) -> None:
-        if scope_to_teardown is None:
-            scope_to_teardown = teardown
-
-        # Do not run teardown if the scope was skipped or never run
-        scope_status: JobScopeStatus = context.get_scope_status(teardown)
-        if scope_status in (JobScopeStatus.UNKNOWN, JobScopeStatus.SKIPPED):
-            context.status.detail(
-                f"Skipping Teardown {scope_to_teardown.type} {scope_to_teardown.name} ({teardown.type} {teardown.name})"
-            )
-            return
-
-        # Teardown a scope.
-        if teardown.teardown:
-            try:
-                section: str = f"Teardown {scope_to_teardown.type} {scope_to_teardown.name}"
-                if teardown is not scope_to_teardown:
-                    section += f" ({teardown.type} {teardown.name})"
-                context.status.start_section(section)
-                teardown.teardown(context)
-            except Exception as e:
-                # Log but do not raise
-                context.status.warning(e)
-            finally:
-                context.status.finish_section()
+    def _run_teardown(self, context: JobContext, teardown: JobTeardownScope) -> None:
+        all_teardowns: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
+        all_teardowns += context.get_teardown(teardown)
+        all_teardowns += teardown.teardown
+        if all_teardowns:
+            with context.status.section(f"Teardown {teardown}"):
+                results: list[Any] = all_teardowns(context)
+                for result in deep_flatten(results):
+                    if isinstance(result, Exception):
+                        context.status.warning(result)
+        else:
+            context.status.detail(f"Skipping Teardown {teardown}")
 
     def _should_skip(self, context: JobContext, scope: JobScope) -> tuple[bool, str]:
         if isinstance(scope, JobConditionalScope):
