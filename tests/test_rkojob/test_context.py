@@ -142,6 +142,43 @@ class TestJobContextImpl(TestCase):
 
             self.assertIs(mock_scope_1, sut.scope)
 
+    def test_root_scope(self) -> None:
+        sut = JobContextImpl()
+        mock_scope_1 = MagicMock()
+        mock_scope_1.name = "scope_1"
+        mock_scope_2 = MagicMock()
+        mock_scope_2.name = "scope_2"
+        with sut.in_scope(mock_scope_1):
+            self.assertIs(mock_scope_1, sut.root_scope)
+
+            with sut.in_scope(mock_scope_2):
+                self.assertIs(mock_scope_1, sut.root_scope)
+
+            self.assertIs(mock_scope_1, sut.root_scope)
+        with self.assertRaises(JobException) as e:
+            _ = sut.root_scope
+        self.assertEqual("No root scope", str(e.exception))
+
+    def test_parent_scope(self) -> None:
+        sut = JobContextImpl()
+        mock_scope_1 = MagicMock()
+        mock_scope_1.name = "scope_1"
+        mock_scope_2 = MagicMock()
+        mock_scope_2.name = "scope_2"
+        mock_scope_3 = MagicMock()
+        mock_scope_3.name = "scope_3"
+        with sut.in_scope(mock_scope_1):
+            with sut.in_scope(mock_scope_2):
+                self.assertIs(mock_scope_1, sut.parent_scope(mock_scope_2))
+                with sut.in_scope(mock_scope_3):
+                    self.assertIs(mock_scope_2, sut.parent_scope())
+                    self.assertIs(mock_scope_1, sut.parent_scope(mock_scope_3, generation=2))
+                    # Silly but possible
+                    self.assertIs(mock_scope_3, sut.parent_scope(mock_scope_3, generation=0))
+                    with self.assertRaises(JobException) as e:
+                        _ = sut.parent_scope(mock_scope_3, generation=3)
+                    self.assertEqual(f"Scope {mock_scope_3} has no parent (generation=3)", str(e.exception))
+
     def test_scopes(self) -> None:
         mock_scope_1 = MagicMock()
         mock_scope_1.name = "scope_1"
