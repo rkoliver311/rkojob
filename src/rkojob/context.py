@@ -125,6 +125,26 @@ class JobContextImpl:
         return self._get_state(None).scope
 
     @property
+    def root_scope(self) -> JobScope:
+        if not self._state_stack:
+            raise JobException("No root scope")
+        return self._state_stack[0].scope
+
+    def parent_scope(self, scope: JobScopeID | None = None, generation: int = 1):
+        if scope is None:
+            scope = self.scope
+        scope_count: int = len(self._state_stack)
+        scope_index: int = scope_count
+        for idx, s in enumerate(self._state_stack):
+            if scope == s.scope:
+                scope_index = idx
+                break
+        parent_index: int = scope_index - generation
+        if parent_index < 0 or scope_index >= scope_count:
+            raise JobException(f"Scope {scope} has no parent (generation={generation})")
+        return self._state_stack[parent_index].scope
+
+    @property
     def scopes(self) -> Tuple[JobScope, ...]:
         """
         :returns: The full scope stack from outermost to innermost.
