@@ -7,7 +7,14 @@ from enum import Enum, auto
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob import JobException, JobScopeStatus, Values, create_scope_id
+from rkojob import (
+    Delegate,
+    JobContext,
+    JobException,
+    JobScopeStatus,
+    Values,
+    create_scope_id,
+)
 from rkojob.context import (
     JobContextImpl,
     JobScopeStatuses,
@@ -79,9 +86,12 @@ class TestJobScopeStatuses(TestCase):
 
 
 class StubScope:
-    def __init__(self, name, type, id=None):
+    def __init__(self, name, type, teardown=None, id=None):
         self.name = name
         self.type = type
+        self.teardown = Delegate[[JobContext], None](continue_on_error=True, reverse=True)
+        if teardown:
+            self.teardown += teardown
         self.id = id or create_scope_id()
 
     def __str__(self):
@@ -196,6 +206,39 @@ class TestJobContextImpl(TestCase):
             self.assertEqual((mock_scope_1,), sut.scopes)
         self.assertEqual(tuple(), sut.scopes)
 
+    def test_teardown(self) -> None:
+        def callback(context):
+            pass
+
+        sut = JobContextImpl()
+        scope = StubScope("scope", 0)
+        with self.assertRaises(JobException) as e:
+            sut.add_teardown(scope, callback)
+        self.assertEqual("No state found", str(e.exception))
+
+        with sut.in_scope(scope):
+            sut.add_teardown(scope, callback)
+            self.assertEqual([callback], sut._get_state(scope).teardown._callbacks)
+
+            sut.remove_teardown(scope, callback)
+            self.assertEqual([], sut._get_state(scope).teardown._callbacks)
+
+        class NonTeardownScope:
+            name = "scope"
+            type = StubScopeType.JOB
+            id = "id"
+
+        with sut.in_scope(NonTeardownScope()) as non_teardown_scope:
+            with self.assertRaises(JobException) as e:
+                sut.add_teardown(non_teardown_scope, callback)
+            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+            with self.assertRaises(JobException) as e:
+                sut.remove_teardown(non_teardown_scope, callback)
+            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+            with self.assertRaises(JobException) as e:
+                sut.get_teardown(non_teardown_scope)
+            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+
     def test_get_scope(self) -> None:
         class StubScopeID:
             def __init__(self, id):
@@ -215,6 +258,15 @@ class TestJobContextImpl(TestCase):
             with self.assertRaises(JobException) as e:
                 sut.get_scope(mock_scope_3_id)
             self.assertEqual("Scope with ID 'scope_3' is not known to this context.", str(e.exception))
+
+    def test_get_scope_status(self) -> None:
+        sut = JobContextImpl()
+        with sut.in_scope(MagicMock()) as mock_scope:
+            sut.status.start_scope(mock_scope)
+            sut.status.error(mock_scope)
+            self.assertEqual(JobScopeStatus.FAILING, sut.get_scope_status(mock_scope))
+            sut.status.finish_scope(mock_scope)
+            self.assertEqual(JobScopeStatus.FAILED, sut.get_scope_status(mock_scope))
 
     def test_error(self):
         self.assertEqual("JobException('Foo')", repr(JobContextImpl().error("Foo")))

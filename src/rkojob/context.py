@@ -14,19 +14,18 @@ from typing import (
 
 from rkojob import (
     JobBaseStatus,
+    JobCallable,
+    JobContext,
     JobException,
     JobScope,
     JobScopeID,
     JobScopeStatus,
     JobStatusCollector,
+    JobTeardownScope,
     Values,
 )
+from rkojob.delegates import Delegate
 from rkojob.writer import JobStatusWriter
-
-
-class JobContextState:
-    def __init__(self, *, scope: JobScope) -> None:
-        self.scope: JobScope = scope
 
 
 class JobScopeStatuses(JobBaseStatus):
@@ -77,6 +76,13 @@ class JobScopeStatuses(JobBaseStatus):
         if key:
             # If we have a running scope mark it as failing
             self._statuses[key[-1]] = JobScopeStatus.FAILING
+
+
+class JobContextState:
+    def __init__(self, *, scope: JobScope) -> None:
+        self.scope: JobScope = scope
+        # Teardown actions registered ad-hoc
+        self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True, reverse=True)
 
 
 class JobContextImpl:
@@ -150,6 +156,24 @@ class JobContextImpl:
         :returns: The full scope stack from outermost to innermost.
         """
         return tuple(state.scope for state in self._state_stack)
+
+    def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
+        scope = self.get_scope(scope)
+        if not isinstance(scope, JobTeardownScope):
+            raise JobException(f"Scope {scope} does not support teardown.")
+        self._get_state(scope).teardown += teardown
+
+    def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
+        scope = self.get_scope(scope)
+        if not isinstance(scope, JobTeardownScope):
+            raise JobException(f"Scope {scope} does not support teardown.")
+        self._get_state(scope).teardown -= teardown
+
+    def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]:
+        scope = self.get_scope(scope)
+        if not isinstance(scope, JobTeardownScope):
+            raise JobException(f"Scope {scope} does not support teardown.")
+        return self._get_state(scope).teardown
 
     def get_scope(self, scope_id: JobScopeID) -> JobScope:
         """

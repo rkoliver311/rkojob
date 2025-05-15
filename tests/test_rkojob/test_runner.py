@@ -10,34 +10,39 @@ from rkojob import (
     JobCallable,
     JobContext,
     JobException,
-    JobScopeType,
     ValueRef,
     create_scope_id,
     job_succeeding,
     scope_failing,
     scope_succeeding,
 )
+from rkojob.delegates import Delegate
 from rkojob.factories import JobContextFactory
 from rkojob.runner import JobRunnerImpl
 
 
-class StubGroupScope:
-    def __init__(self, name, type, scopes, id=None):
+class StubScope:
+    def __init__(self, name, type, teardown=None, id=None):
         self.name = name
         self.type = type
-        self.scopes = scopes
+        self.teardown = Delegate[[JobContext], None](continue_on_error=True)
+        if teardown:
+            self.teardown += teardown
         self.id = id or create_scope_id()
 
 
-class StubActionScope:
+class StubGroupScope(StubScope):
+    def __init__(self, name, type, scopes, teardown=None, id=None):
+        super().__init__(name, type, teardown, id)
+        self.scopes = scopes
+
+
+class StubActionScope(StubScope):
     def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None, id=None):
-        self.name = name
-        self.type = type
+        super().__init__(name, type, teardown, id)
         self.action = action
-        self.teardown = teardown
         self.run_if = run_if
         self.skip_if = skip_if
-        self.id = id or create_scope_id()
 
 
 class StubScopeType(Enum):
@@ -51,6 +56,10 @@ class TestJobRunnerImpl(TestCase):
         side_effects = []
 
         job = self._create_job(side_effects)
+        job.scopes[0].teardown += lambda context: side_effects.append(f"Teardown {job.scopes[0].name} 1")
+        job.scopes[0].teardown += lambda context: side_effects.append(f"Teardown {job.scopes[0].name} 2")
+        job.teardown += lambda context: side_effects.append("Teardown job 1")
+        job.teardown += lambda context: side_effects.append("Teardown job 2")
 
         JobRunnerImpl().run(JobContextFactory.create(), job)
 
@@ -58,6 +67,8 @@ class TestJobRunnerImpl(TestCase):
             [
                 "Action: job->stage1->step1.1",
                 "Action: job->stage1->step1.2",
+                "Teardown stage1 1",
+                "Teardown stage1 2",
                 "Action: job->stage2->step2.1",
                 "Action: job->stage2->step2.2",
                 "Teardown stage2: step2.2",
@@ -68,6 +79,8 @@ class TestJobRunnerImpl(TestCase):
                 "Teardown job: step3.1",
                 "Teardown job: step1.2",
                 "Teardown job: step1.1",
+                "Teardown job 1",
+                "Teardown job 2",
             ],
             side_effects,
         )
@@ -77,20 +90,20 @@ class TestJobRunnerImpl(TestCase):
 
         job = self._create_job(side_effects)
         job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
-        job.scopes[2].scopes[1].teardown = self._teardown(
-            job.scopes[1].scopes[1].name, side_effects, StubScopeType.JOB, fail=True
+        # This teardown should not run because the action never runs
+        job.scopes[1].scopes[1].action = self._action(
+            side_effects,
+            root_teardown=self._teardown(job.scopes[1].scopes[1].name, side_effects, fail=True),
         )
+        # This teardown should run
+        job.teardown += self._teardown("job", side_effects)
 
         with self.assertRaises(Exception) as e:
             JobRunnerImpl().run(JobContextFactory.create(), job)
         self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
 
         self.assertEqual(
-            [
-                "Action: job->stage1->step1.1",
-                "Teardown job: step1.2",
-                "Teardown job: step1.1",
-            ],
+            ["Action: job->stage1->step1.1", "Teardown job: step1.1", "Teardown job: job"],
             side_effects,
         )
 
@@ -118,16 +131,13 @@ class TestJobRunnerImpl(TestCase):
                         StubActionScope(
                             name="action-1-1",
                             type=StubScopeType.STEP,
-                            action=lambda context: side_effects.append(f"Hello from {context.scope.name}!"),
+                            action=self._action(side_effects),
                         ),
                         StubActionScope(
                             name="action-1-2",
                             type=StubScopeType.STEP,
-                            action=lambda context: side_effects.append(f"Hello from {context.scope.name}!"),
-                            teardown=lambda context: (
-                                side_effects.append(f"Teardown {context.scope.name} from action-1-2!")
-                                if context.scope.type == StubScopeType.STAGE
-                                else None
+                            action=self._action(
+                                side_effects, parent_teardown=self._teardown("action-1-2", side_effects)
                             ),
                         ),
                         StubGroupScope(
@@ -137,13 +147,12 @@ class TestJobRunnerImpl(TestCase):
                                 StubActionScope(
                                     name="action-1-2-1",
                                     type=StubScopeType.STEP,
-                                    action=lambda context: side_effects.append(f"Hello from {context.scope.name}!"),
-                                    teardown=lambda _: None,
+                                    action=self._action(side_effects),
                                 ),
                                 StubActionScope(
                                     name="action-1-2-2",
                                     type=StubScopeType.STEP,
-                                    action=lambda context: side_effects.append(f"Hello from {context.scope.name}!"),
+                                    action=self._action(side_effects),
                                 ),
                             ],
                         ),
@@ -156,7 +165,7 @@ class TestJobRunnerImpl(TestCase):
                         StubActionScope(
                             name="action-2-1",
                             type=StubScopeType.STEP,
-                            action=lambda context: side_effects.append(f"Hello from {context.scope.name}!"),
+                            action=self._action(side_effects),
                         ),
                         StubActionScope(
                             name="action-2-2",
@@ -177,22 +186,33 @@ class TestJobRunnerImpl(TestCase):
 
         self.assertEqual(
             [
-                "Hello from action-1-1!",
-                "Hello from action-1-2!",
-                "Hello from action-1-2-1!",
-                "Hello from action-1-2-2!",
-                "Teardown group-1 from action-1-2!",
-                "Hello from action-2-1!",
+                "Action: root->group-1->action-1-1",
+                "Action: root->group-1->action-1-2",
+                "Action: root->group-1->group-1-2->action-1-2-1",
+                "Action: root->group-1->group-1-2->action-1-2-2",
+                "Teardown group-1: action-1-2",
+                "Action: root->group-2->action-2-1",
                 "Teardown action-2-2 from action-2-2!",
-                "Teardown group-2 from action-2-2!",
-                "Teardown root from action-2-2!",
             ],
             side_effects,
         )
 
     @staticmethod
-    def _action(side_effects: list[str], fail: bool = False) -> JobCallable[None]:
+    def _action(
+        side_effects: list[str],
+        fail: bool = False,
+        teardown: JobCallable[None] | None = None,
+        root_teardown: JobCallable[None] | None = None,
+        parent_teardown: JobCallable[None] | None = None,
+    ) -> JobCallable[None]:
         def wrapped(context: JobContext) -> None:
+            if teardown:
+                context.add_teardown(context.scope, teardown)
+            if parent_teardown:
+                context.add_teardown(context.parent_scope(context.scope), parent_teardown)
+            if root_teardown:
+                context.add_teardown(context.root_scope, root_teardown)
+
             if fail:
                 raise Exception(f"Action failed: {'->'.join([scope.name for scope in context.scopes])}")
             side_effects.append(f"Action: {'->'.join([scope.name for scope in context.scopes])}")
@@ -200,14 +220,11 @@ class TestJobRunnerImpl(TestCase):
         return wrapped
 
     @staticmethod
-    def _teardown(
-        name: str, side_effects: list[str], *scope_types: JobScopeType, fail: bool = False
-    ) -> JobCallable[None]:
+    def _teardown(name: str, side_effects: list[str], fail: bool = False) -> JobCallable[None]:
         def wrapped(context: JobContext) -> None:
-            if context.scope.type in scope_types:
-                if fail:
-                    raise Exception(f"Teardown {context.scope.name} failed: {name}")
-                side_effects.append(f"Teardown {context.scope.name}: {name}")
+            if fail:
+                raise Exception(f"Teardown {context.scope.name} failed: {name}")
+            side_effects.append(f"Teardown {context.scope.name}: {name}")
 
         return wrapped
 
@@ -223,14 +240,12 @@ class TestJobRunnerImpl(TestCase):
                         StubActionScope(
                             name="step1.1",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step1.1", side_effects, StubScopeType.JOB),
+                            action=self._action(side_effects, root_teardown=self._teardown("step1.1", side_effects)),
                         ),
                         StubActionScope(
                             name="step1.2",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step1.2", side_effects, StubScopeType.JOB),
+                            action=self._action(side_effects, root_teardown=self._teardown("step1.2", side_effects)),
                         ),
                     ],
                 ),
@@ -241,14 +256,15 @@ class TestJobRunnerImpl(TestCase):
                         StubActionScope(
                             name="step2.1",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step2.1", side_effects, StubScopeType.STAGE),
+                            action=self._action(side_effects, parent_teardown=self._teardown("step2.1", side_effects)),
                         ),
                         StubActionScope(
                             name="step2.2",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step2.2", side_effects, StubScopeType.STAGE),
+                            action=self._action(
+                                side_effects,
+                                parent_teardown=self._teardown("step2.2", side_effects),
+                            ),
                         ),
                     ],
                 ),
@@ -259,14 +275,12 @@ class TestJobRunnerImpl(TestCase):
                         StubActionScope(
                             name="step3.1",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step3.1", side_effects, StubScopeType.JOB),
+                            action=self._action(side_effects, root_teardown=self._teardown("step3.1", side_effects)),
                         ),
                         StubActionScope(
                             name="step3.2",
                             type=StubScopeType.STEP,
-                            action=self._action(side_effects),
-                            teardown=self._teardown("step3.2", side_effects, StubScopeType.JOB),
+                            action=self._action(side_effects, root_teardown=self._teardown("step3.2", side_effects)),
                         ),
                     ],
                 ),
@@ -309,7 +323,6 @@ class TestJobRunnerImpl(TestCase):
             [
                 "Action: job->stage1->step1.2",
                 "Teardown job: step1.2",
-                "Teardown job: step1.1",
             ],
             side_effects,
         )
@@ -371,7 +384,6 @@ class TestJobRunnerImpl(TestCase):
         self.assertEqual(
             [
                 "Action: job->stage1->step1.1",
-                "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
             side_effects,
@@ -380,8 +392,8 @@ class TestJobRunnerImpl(TestCase):
     def test_skip_if_fail_teardown(self) -> None:
         side_effects: list[str] = []
         job = self._create_job(side_effects)
-        job.scopes[1].scopes[1].teardown = self._teardown(
-            job.scopes[1].scopes[1].name, side_effects, StubScopeType.STAGE, fail=True
+        job.scopes[1].scopes[1].action = self._action(
+            side_effects, parent_teardown=self._teardown(job.scopes[1].scopes[1].name, side_effects, fail=True)
         )
 
         JobRunnerImpl().run(JobContextFactory.create(), job)
@@ -417,7 +429,6 @@ class TestJobRunnerImpl(TestCase):
                 "Action: job->stage1->step1.1",
                 "Action: job->stage2->step2.1",
                 "Teardown stage2: step2.1",
-                "Teardown job: step1.2",
                 "Teardown job: step1.1",
             ],
             side_effects,

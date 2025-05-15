@@ -24,7 +24,7 @@ from typing import (
 )
 from uuid import uuid4
 
-from rkojob.delegates import delegate
+from rkojob.delegates import Delegate, delegate
 from rkojob.values import (
     EnvironmentVariable,
     NoValue,
@@ -265,6 +265,9 @@ class JobContext(Protocol):
     @property
     def root_scope(self) -> JobScope: ...
     def parent_scope(self, scope: JobScopeID | None = ..., generation: int = ...): ...
+    def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
+    def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
+    def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]: ...
     @property
     def scopes(self) -> Tuple[JobScope, ...]: ...
     def get_scope(self, scope_id: JobScopeID) -> JobScope: ...
@@ -674,16 +677,15 @@ class JobActionScope(JobScope, JobConditionalScope, Protocol):
 
 
 @runtime_checkable
-class JobTeardownScope(JobScope, JobConditionalScope, Protocol):
+class JobTeardownScope(JobScope, Protocol):
     """
-    Leaf scope that performs a *teardown* after execution of a scope
-    (not necessarily *this* scope).
+    Scope that performs zero or more *teardown* actions before exiting.
 
-    :ivar JobCallable | None teardown: Function that executes the scope's teardown work.
+    :ivar Delegate[[JobContext], None] teardown: Delegate used to add/call teardown actions.
     """
 
-    @property
-    def teardown(self) -> JobCallable[None] | None: ...
+    @delegate(continue_on_error=True, reverse=True)
+    def teardown(self, context: JobContext): ...
 
 
 @runtime_checkable
