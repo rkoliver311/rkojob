@@ -20,6 +20,7 @@ from rkojob import (
     create_scope_id,
     job_action,
     job_always,
+    job_context,
     job_failing,
     job_never,
     job_succeeding,
@@ -34,7 +35,7 @@ from rkojob import (
 )
 from rkojob.coerce import as_bool
 from rkojob.factories import JobContextFactory
-from rkojob.values import NoValueError, ValueRef, Values
+from rkojob.values import ComputedValue, NoValueError, ValueRef, Values
 
 
 class TestJobException(TestCase):
@@ -533,6 +534,15 @@ class TestJobScopeCondition(TestCase):
         mock_context.get_errors.assert_called_with(mock_scope)
 
 
+class TestJobContext(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        self.assertIs(mock_context, job_context(mock_context))
+
+    def test_repr(self) -> None:
+        self.assertEqual("job_context()", repr(job_context))
+
+
 class TestJobAction(TestCase):
     def test(self) -> None:
         mock_action = MagicMock()
@@ -540,6 +550,13 @@ class TestJobAction(TestCase):
         self.assertIsInstance(sut, JobAction)
         sut(MagicMock())
         mock_action.assert_called_once()
+
+    def test_with_args(self) -> None:
+        mock_action = MagicMock()
+        sut = job_action(mock_action, ValueRef("foo"), bar=ComputedValue(lambda: "bar"))
+        self.assertIsInstance(sut, JobAction)
+        sut(MagicMock())
+        mock_action.assert_called_once_with("foo", bar="bar")
 
     def test_repr(self) -> None:
         mock_action = MagicMock()
@@ -560,11 +577,6 @@ class FooAction(JobAction):
 
 class TestLazyAction(TestCase):
     def test(self) -> None:
-        class StubScope:
-            def __init__(self, name, type):
-                self.name = name
-                self.type = type
-
         sut = lazy_action(FooAction, ["foo"], foo="foo")
         action_instance = sut._get_action_instance(MagicMock())  # type: ignore[attr-defined]
         self.assertEqual(["foo"], action_instance.side_effects)
