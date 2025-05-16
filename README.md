@@ -165,7 +165,7 @@ the `JobContext`:
 ``` python
 def some_action(context: JobContext) -> None:
     context.add_teardown(
-        context.parent_scope(),
+        context.get_scope(generation=1),
         ShellAction("echo", "teardown parent scope")
     )
 ```
