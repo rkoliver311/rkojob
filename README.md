@@ -1,5 +1,3 @@
-from rkojob.actions import ShellAction
-
 # rkoJob
 
 **rkoJob** is a lightweight framework for defining and running
