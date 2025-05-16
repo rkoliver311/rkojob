@@ -571,6 +571,28 @@ class context_value(Generic[R_co]):
 environment_variable: type[EnvironmentVariable] = EnvironmentVariable
 """Convenience alias for a value provided by an environment variable."""
 
+value_ref: type[ValueRef] = ValueRef
+"""Convenience alias for a value held in a ValueRef"""
+
+
+class job_scope:
+    def __init__(self, scope: JobScopeID | None = None, generation: int = 0) -> None:
+        """
+        Resolves a `JobScope` from the context by a `JobScopeID`.
+        :param scope: The `JobScopeID` used to resolve the scope or ``None`` to resolve to the current scope.
+        :param generation: The "generation" of the scope. A value of 0 returns the scope that identified by *scope*,
+         1 returns *scope*'s parent, 2 returns the grandparent and so on. A negative value returns a scope
+         relative to the root with -1 being the root scope.
+        """
+        self._scope: JobScopeID | None = scope
+        self._generation: int = generation
+
+    def __call__(self, context: JobContext) -> JobScope:
+        return context.get_scope(self._scope, generation=self._generation)
+
+    def __repr__(self) -> str:
+        return f"job_scope({self._scope!r})"
+
 
 # Convenience functions for assigning values to consumer-like instances.
 # This includes objects that accept values (ex. ``ValueConsumer``, ``ValueRef``)
