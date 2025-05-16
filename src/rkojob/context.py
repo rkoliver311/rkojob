@@ -131,26 +131,6 @@ class JobContextImpl:
         return self._get_state(None).scope
 
     @property
-    def root_scope(self) -> JobScope:
-        if not self._state_stack:
-            raise JobException("No root scope")
-        return self._state_stack[0].scope
-
-    def parent_scope(self, scope: JobScopeID | None = None, generation: int = 1):
-        if scope is None:
-            scope = self.scope
-        scope_count: int = len(self._state_stack)
-        scope_index: int = scope_count
-        for idx, s in enumerate(self._state_stack):
-            if scope == s.scope:
-                scope_index = idx
-                break
-        parent_index: int = scope_index - generation
-        if parent_index < 0 or scope_index >= scope_count:
-            raise JobException(f"Scope {scope} has no parent (generation={generation})")
-        return self._state_stack[parent_index].scope
-
-    @property
     def scopes(self) -> Tuple[JobScope, ...]:
         """
         :returns: The full scope stack from outermost to innermost.
@@ -158,30 +138,62 @@ class JobContextImpl:
         return tuple(state.scope for state in self._state_stack)
 
     def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
-        scope = self.get_scope(scope)
+        scope = self._resolve_scope(scope)
         if not isinstance(scope, JobTeardownScope):
             raise JobException(f"Scope {scope} does not support teardown.")
         self._get_state(scope).teardown += teardown
 
     def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
-        scope = self.get_scope(scope)
+        scope = self._resolve_scope(scope)
         if not isinstance(scope, JobTeardownScope):
             raise JobException(f"Scope {scope} does not support teardown.")
         self._get_state(scope).teardown -= teardown
 
     def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]:
-        scope = self.get_scope(scope)
+        scope = self._resolve_scope(scope)
         if not isinstance(scope, JobTeardownScope):
             raise JobException(f"Scope {scope} does not support teardown.")
         return self._get_state(scope).teardown
 
-    def get_scope(self, scope_id: JobScopeID) -> JobScope:
+    def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope:
         """
-        Gets the `JobScope` instance associated with the provided *scope_id*.
+        Resolve a scope relative to another, where generation=0 is the same scope,
+        generation=1 is the parent, etc.
 
-        :param scope_id: A `JobScopeID` used to identify the scope.
-        :returns: The `JobScope` associated with *scope_id* or *scope_id* if it is an instance of `JobScope`.
+        :param scope: Scope to resolve relative to or ``None`` to use the current scope.
+        :param generation: The generation to resolve. A negative value means resolve relative from the root scope
+         with -1 being the root.
         """
+        if generation == 0:
+            if scope is None:
+                return self.scope
+            return self._resolve_scope(scope)
+
+        scope_index: int
+        scopes: list[JobScope] = list(self.scopes)
+        if generation < 0:
+            # Get a scope relative to the root
+            scope_index = -1
+        else:
+            # Get a scope relative to scope
+            if scope is None:
+                scope_index = len(scopes) - 1
+            else:
+                scope = self._resolve_scope(scope)
+                try:
+                    scope_index = scopes.index(scope)
+                except ValueError:
+                    raise JobException(f"Scope '{scope}' is not in scope")
+
+        scope_index -= generation
+        if scope_index < 0 or scope_index >= len(scopes):
+            raise JobException(
+                f"Unable to get scope relative to {'root' if generation < 0 else scope} using generation={generation}"
+            )
+
+        return scopes[scope_index]
+
+    def _resolve_scope(self, scope_id: JobScopeID) -> JobScope:
         if isinstance(scope_id, JobScope):
             # Scope ID is the scope itself.
             return scope_id
@@ -201,7 +213,7 @@ class JobContextImpl:
     def _get_state(self, scope: JobScopeID | None) -> JobContextState:
         # Get the state for the provided scope
         if not self._state_stack:
-            raise JobException("No state found")
+            raise JobException("Context has no scope")
         if scope is None:
             return self._state_stack[-1]
         state: JobContextState | None = next(iter(it for it in self._state_stack if it.scope.id == scope.id), None)

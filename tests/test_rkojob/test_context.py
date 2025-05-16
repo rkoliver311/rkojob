@@ -119,7 +119,7 @@ class TestJobContextImpl(TestCase):
         sut = JobContextImpl()
         with self.assertRaises(JobException) as e:
             _ = sut._get_state(None)
-        self.assertEqual("No state found", str(e.exception))
+        self.assertEqual("Context has no scope", str(e.exception))
 
         mock_scope_1 = StubScope("scope_1", StubScopeType.JOB)
         mock_scope_2 = StubScope("scope_2", StubScopeType.STAGE)
@@ -152,42 +152,79 @@ class TestJobContextImpl(TestCase):
 
             self.assertIs(mock_scope_1, sut.scope)
 
-    def test_root_scope(self) -> None:
+    def test_get_scope(self) -> None:
+        class StubScopeID:
+            def __init__(self, id):
+                self.id = id
+
         sut = JobContextImpl()
-        mock_scope_1 = MagicMock()
-        mock_scope_1.name = "scope_1"
-        mock_scope_2 = MagicMock()
-        mock_scope_2.name = "scope_2"
-        with sut.in_scope(mock_scope_1):
-            self.assertIs(mock_scope_1, sut.root_scope)
 
-            with sut.in_scope(mock_scope_2):
-                self.assertIs(mock_scope_1, sut.root_scope)
-
-            self.assertIs(mock_scope_1, sut.root_scope)
         with self.assertRaises(JobException) as e:
-            _ = sut.root_scope
-        self.assertEqual("No root scope", str(e.exception))
+            _ = sut.get_scope()
+        self.assertEqual("Context has no scope", str(e.exception))
 
-    def test_parent_scope(self) -> None:
-        sut = JobContextImpl()
         mock_scope_1 = MagicMock()
         mock_scope_1.name = "scope_1"
-        mock_scope_2 = MagicMock()
-        mock_scope_2.name = "scope_2"
-        mock_scope_3 = MagicMock()
-        mock_scope_3.name = "scope_3"
+        mock_scope_1.id = "scope_id"
         with sut.in_scope(mock_scope_1):
+            self.assertIs(mock_scope_1, sut.get_scope())
+            self.assertIs(mock_scope_1, sut.get_scope(StubScopeID("scope_id")))
+
+            # generation == 0: current scope
+            self.assertIs(mock_scope_1, sut.get_scope(generation=0))
+            # generation == -1: root scope
+            self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
+
+            mock_scope_2 = MagicMock()
+            mock_scope_2.name = "scope_2"
+
             with sut.in_scope(mock_scope_2):
-                self.assertIs(mock_scope_1, sut.parent_scope(mock_scope_2))
+                self.assertIs(mock_scope_1, sut.get_scope(generation=1))
+                self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
+
+                mock_scope_3 = MagicMock()
+                mock_scope_3.name = "scope_3"
+
                 with sut.in_scope(mock_scope_3):
-                    self.assertIs(mock_scope_2, sut.parent_scope())
-                    self.assertIs(mock_scope_1, sut.parent_scope(mock_scope_3, generation=2))
-                    # Silly but possible
-                    self.assertIs(mock_scope_3, sut.parent_scope(mock_scope_3, generation=0))
+                    self.assertIs(mock_scope_3, sut.get_scope())
+                    self.assertIs(mock_scope_2, sut.get_scope(generation=1))
+                    self.assertIs(mock_scope_1, sut.get_scope(generation=2))
+                    self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
+                    self.assertIs(mock_scope_2, sut.get_scope(generation=-2))
+
                     with self.assertRaises(JobException) as e:
-                        _ = sut.parent_scope(mock_scope_3, generation=3)
-                    self.assertEqual(f"Scope {mock_scope_3} has no parent (generation=3)", str(e.exception))
+                        _ = sut.get_scope(mock_scope_3, generation=-4)
+                    self.assertEqual("Unable to get scope relative to root using generation=-4", str(e.exception))
+
+                    with self.assertRaises(JobException) as e:
+                        _ = sut.get_scope(mock_scope_3, generation=3)
+                    self.assertEqual(
+                        f"Unable to get scope relative to {mock_scope_3} using generation=3", str(e.exception)
+                    )
+
+                with self.assertRaises(JobException) as e:
+                    _ = sut.get_scope(mock_scope_3, generation=1)
+                self.assertEqual(f"Scope '{mock_scope_3}' is not in scope", str(e.exception))
+
+    def test_resolve_scope(self) -> None:
+        class StubScopeID:
+            def __init__(self, id):
+                self.id = id
+
+        mock_scope = MagicMock(id="scope_id")
+
+        sut = JobContextImpl()
+        stub_scope_id = StubScopeID("scope_id")
+
+        with self.assertRaises(JobException) as e:
+            _ = sut._resolve_scope(stub_scope_id)
+        self.assertEqual("Scope with ID 'scope_id' is not known to this context.", str(e.exception))
+
+        with sut.in_scope(mock_scope):
+            self.assertEqual(mock_scope, sut._resolve_scope(stub_scope_id))
+
+        # resolves even after leaving scope
+        self.assertEqual(mock_scope, sut._resolve_scope(stub_scope_id))
 
     def test_scopes(self) -> None:
         mock_scope_1 = MagicMock()
@@ -214,7 +251,7 @@ class TestJobContextImpl(TestCase):
         scope = StubScope("scope", 0)
         with self.assertRaises(JobException) as e:
             sut.add_teardown(scope, callback)
-        self.assertEqual("No state found", str(e.exception))
+        self.assertEqual("Context has no scope", str(e.exception))
 
         with sut.in_scope(scope):
             sut.add_teardown(scope, callback)
@@ -238,26 +275,6 @@ class TestJobContextImpl(TestCase):
             with self.assertRaises(JobException) as e:
                 sut.get_teardown(non_teardown_scope)
             self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
-
-    def test_get_scope(self) -> None:
-        class StubScopeID:
-            def __init__(self, id):
-                self.id = id
-
-        mock_scope_1 = StubScope("scope_1", 1)
-        mock_scope_1_id = StubScopeID(id=mock_scope_1.id)
-
-        mock_scope_2 = StubScope("scope_2", 1)
-        mock_scope_3_id = StubScopeID(id="scope_3")
-
-        sut = JobContextImpl()
-        with sut.in_scope(mock_scope_1):
-
-            self.assertIs(sut.get_scope(mock_scope_1_id), mock_scope_1)
-            self.assertIs(sut.get_scope(mock_scope_2), mock_scope_2)
-            with self.assertRaises(JobException) as e:
-                sut.get_scope(mock_scope_3_id)
-            self.assertEqual("Scope with ID 'scope_3' is not known to this context.", str(e.exception))
 
     def test_get_scope_status(self) -> None:
         sut = JobContextImpl()
