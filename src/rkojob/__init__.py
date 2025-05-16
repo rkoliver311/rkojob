@@ -509,6 +509,19 @@ class lazy_format:
         return f"lazy_format({self._template!r}{', ' + data_str if data_str else ''})"
 
 
+class _JobContextIdentity:
+    """A `JobCallable[JobContext]` that returns the context itself."""
+
+    def __call__(self, context: JobContext) -> JobContext:
+        return context
+
+    def __repr__(self) -> str:
+        return "job_context()"
+
+
+job_context = _JobContextIdentity()
+
+
 class context_value(Generic[R_co]):
     def __init__(
         self, key: str, coercer: Callable[[Any], R_co] | None = None, default: R_co | NoValueType = NoValue
@@ -722,24 +735,30 @@ class JobRunner(Protocol):
     def run(self, context: JobContext, scope: JobScope) -> None: ...
 
 
-class job_action(JobAction):
-    def __init__(self, action: JobCallable[None]) -> None:
-        """
-        Wrap a `JobCallable[None]` in a `JobAction` instance.
+P = ParamSpec("P")
+R = TypeVar("R")
 
-        :param action: The `JobCallable[None]` to wrap.
+
+class job_action(JobAction, Generic[P, R]):
+    def __init__(self, action: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> None:
         """
-        self._action: JobCallable[None] = action
+        Wraps an arbitrary `callable` in a `JobAction` instance.
+
+        :param action: The `callable` to wrap.
+        :param args: Positional args to resolve and pass into *action*
+        :param kwargs: Keyword args to resolve and pass into *action*
+        """
+        self._action: Callable[P, R] = action
+        self._args: tuple[Any, ...] = args
+        self._kwargs: dict[str, Any] = kwargs
 
     def action(self, context: JobContext) -> None:
-        self._action(context)
+        self._action(*resolve_values(self._args, context=context), **resolve_map(self._kwargs, context=context))
 
     def __repr__(self) -> str:
         return f"job_action({self._action!r})"
 
 
-R = TypeVar("R")
-P = ParamSpec("P")
 A = TypeVar("A", bound=JobAction)
 
 
