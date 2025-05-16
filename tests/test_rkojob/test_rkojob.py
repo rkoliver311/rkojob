@@ -23,6 +23,7 @@ from rkojob import (
     job_context,
     job_failing,
     job_never,
+    job_scope,
     job_succeeding,
     lazy_action,
     lazy_format,
@@ -332,6 +333,26 @@ class TestContextValue(TestCase):
             "(first tried: ['job.stage.step.key', 'job.stage.key', 'job.key']).",
             str(e.exception),
         )
+
+
+class TestJobScope(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_context.get_scope.return_value = mock_scope
+        sut = job_scope(mock_scope)
+        self.assertIs(mock_scope, sut(mock_context))
+        mock_context.get_scope.assert_called_once_with(mock_scope, generation=0)
+
+        mock_context.get_scope.reset_mock()
+
+        sut = job_scope(mock_scope, generation=1)
+        self.assertIs(mock_scope, sut(mock_context))
+        mock_context.get_scope.assert_called_once_with(mock_scope, generation=1)
+
+    def test_repr(self) -> None:
+        mock_scope = MagicMock()
+        self.assertEqual(f"job_scope({mock_scope!r})", repr(job_scope(mock_scope)))
 
 
 class TestResolveValue(TestCase):

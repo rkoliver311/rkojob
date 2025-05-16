@@ -144,6 +144,24 @@ Built-in actions include:
   for common CLI tools.
 - You can also define your own custom actions.
 
+If a custom action takes more than just a single JobContext argument (or
+no JobContext at all), it must be wrapped with job_action to allow
+arguments to be resolved from the job context at runtime:
+
+``` python
+with stage.step("step") as step:
+    def custom_action(context, arg1, arg2, arg3=None):
+        # Do some work...
+
+    step.action = job_action(
+        custom_action,
+        job_context,  # Deferred access to JobContext
+        context_value("arg1"),
+        context_value("arg2"),
+        arg3=context_value("arg3")
+    )
+```
+
 ### Scope Teardown
 
 Each scope can define one or more teardown actions to be executed just
@@ -155,7 +173,7 @@ You can register teardown actions during job definition:
 ``` python
 with job.stage("stage") as stage:
     ...
-    stage.teardown += ShellAction("echo", "tearing down stage")
+    stage.teardown += ShellAction("echo", lazy_format("tearing down {stage}", stage=job_scope(stage)))
     stage.teardown += ShellAction("echo", "more tearing down")
 ```
 
@@ -229,6 +247,36 @@ If both are set:
 
 - The scope must pass `run_if`
 - Then, it must not be blocked by `skip_if`
+
+### Deferred Evaluation
+
+Many values needed at job execution time are not known at the time of
+job definition. These values can be specified using built-in helpers
+like `context_value()` and others.
+
+``` python
+# Read a value from the context
+dry_run = context_value("dry_run", as_bool)
+
+# Read a value from the environment and convert it
+dry_run = environment_variable("DRY_RUN", as_bool)
+
+# Use a read/write value reference
+dry_run = value_ref(True)
+
+# Get the current scope’s parent
+parent_scope = job_scope(generation=1)
+
+# Format a string using values from the context
+url = lazy_format("https://{hostname}:{port}/{path}")
+
+# Access the current context (deferred)
+context = job_context
+```
+
+Deferred values must be resolved at execution time using
+`resolve_value`, `resolve_values`, `resolve_map`, etc. All built-in
+actions automatically resolve these values when they run.
 
 ------------------------------------------------------------------------
 

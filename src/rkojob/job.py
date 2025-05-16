@@ -32,9 +32,6 @@ class JobScopes(Enum):
         return self.name.capitalize()
 
 
-A = TypeVar("A", bound=JobCallable[None])
-
-
 class JobScopeIDMixin(JobScopeID):
     _id: str
 
@@ -49,6 +46,9 @@ class JobScopeIDMixin(JobScopeID):
 
     def __hash__(self) -> int:
         return hash(self.id)
+
+
+A = TypeVar("A", bound=JobCallable[None])
 
 
 class JobStep(JobScopeIDMixin, Generic[A]):
