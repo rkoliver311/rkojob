@@ -144,8 +144,8 @@ Built-in actions include:
   for common CLI tools.
 - You can also define your own custom actions.
 
-If a custom action takes more than just a single JobContext argument (or
-no JobContext at all), it must be wrapped with job_action to allow
+If a custom action takes more than just a single `JobContext` argument (or
+no `JobContext` at all), it must be wrapped with `job_action` in order for
 arguments to be resolved from the job context at runtime:
 
 ``` python
@@ -164,7 +164,7 @@ with stage.step("step") as step:
 
 ### Scope Teardown
 
-Each scope can define one or more teardown actions to be executed just
+Each scope can define zero or more teardown actions to be executed just
 before the scope exits. Teardown actions are useful for cleanup,
 finalization, or diagnostics.
 
