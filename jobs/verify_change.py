@@ -38,3 +38,6 @@ with JobBuilder("verify-change") as job:
             step.action = tox.run(e=py_env)
 
 verify_change = job.build()
+
+# Replace reference with built step
+verify_test_structure = verify_test_structure.build()
