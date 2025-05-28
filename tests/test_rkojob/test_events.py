@@ -4,17 +4,21 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from rkojob import JobEvent, JobScopeStack, create_context_id, create_scope_id
 from rkojob.events import (
+    JobBufferedEventHandler,
     JobDetailEvent,
     JobDirectEventDispatcher,
     JobErrorEvent,
     JobFinishItemEvent,
     JobFinishScopeEvent,
     JobFinishSectionEvent,
+    JobForkContextEvent,
     JobInfoEvent,
+    JobJoinContextEvent,
+    JobLocalEventDispatcher,
     JobOutputEvent,
     JobSkipScopeEvent,
     JobStartItemEvent,
@@ -23,6 +27,28 @@ from rkojob.events import (
     JobStatusImpl,
     JobWarningEvent,
 )
+
+
+class TestJobForkContextEvent(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        forked_context = MagicMock()
+        sut = JobForkContextEvent(mock_context, mock_scope, forked_context=forked_context)
+        self.assertIs(mock_context, sut.context)
+        self.assertIs(mock_scope, sut.scope)
+        self.assertIs(forked_context, sut.forked_context)
+
+
+class TestJobJoinContextEvent(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        joined_context = MagicMock()
+        sut = JobJoinContextEvent(mock_context, mock_scope, joined_context=joined_context)
+        self.assertIs(mock_context, sut.context)
+        self.assertIs(mock_scope, sut.scope)
+        self.assertIs(joined_context, sut.joined_context)
 
 
 class StubContext:
@@ -110,6 +136,22 @@ class TestJobStatusImpl(TestCase):
                 expected_value,
                 f"Mismatch in event field '{key}': expected {expected_value!r}, got {actual_value!r}.",
             )
+
+    def test_fork_context(self) -> None:
+        stub_context, _, mock_handler, sut = self._create_sut()
+
+        sut.fork_context(stub_context)  # type: ignore[arg-type]
+        self.assertHandledEvent(
+            mock_handler.handle, JobForkContextEvent, stub_context, None, forked_context=stub_context
+        )
+
+    def test_join_context(self) -> None:
+        stub_context, _, mock_handler, sut = self._create_sut()
+
+        sut.join_context(stub_context)  # type: ignore[arg-type]
+        self.assertHandledEvent(
+            mock_handler.handle, JobJoinContextEvent, stub_context, None, joined_context=stub_context
+        )
 
     def test_start_scope(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -435,3 +477,66 @@ class TestJobDirectEventDispatcher(TestCase):
         # Both still called
         mock_handler_1.handle.assert_called_once_with(mock_event)
         mock_handler_2.handle.assert_called_once_with(mock_event)
+
+
+class TestJobBufferedEventHandler(TestCase):
+    def test(self) -> None:
+        mock_handler = MagicMock(handle=MagicMock())
+        mock_event1 = MagicMock(field="abc")
+        mock_event2 = MagicMock(field="xyz")
+
+        sut = JobBufferedEventHandler(mock_handler)
+        sut.handle(mock_event1)
+        sut.handle(mock_event2)
+        mock_handler.handle.assert_not_called()
+
+        sut.flush()
+        mock_handler.handle.assert_has_calls([call(mock_event1), call(mock_event2)])
+
+        sut.flush()
+        mock_handler.handle.assert_has_calls([call(mock_event1), call(mock_event2)])
+
+    def test_with_size(self) -> None:
+        mock_handler = MagicMock(handle=MagicMock())
+        mock_event1 = MagicMock(field="abc")
+        mock_event2 = MagicMock(field="xyz")
+
+        sut = JobBufferedEventHandler(mock_handler, size=1)
+        sut.handle(mock_event1)
+        sut.handle(mock_event2)
+        mock_handler.handle.assert_has_calls([call(mock_event1)])
+
+        sut.flush()
+        mock_handler.handle.assert_has_calls([call(mock_event1), call(mock_event2)])
+
+
+class StubHandler:
+    def __init__(self):
+        self.events = []
+
+    def handle(self, event):
+        self.events.append(event)
+
+
+class TestJobLocalEventDispatcher(TestCase):
+    def test(self) -> None:
+        flush_to = StubDispatcher()
+        handler1 = StubHandler()
+        flush_to.add_handler(handler1)
+
+        sut = JobLocalEventDispatcher(flush_to)
+        handler2 = StubHandler()
+        sut.add_handler(handler2)
+
+        mock_event = MagicMock()
+        sut.handle(mock_event)
+
+        self.assertEqual([], handler1.events)
+        self.assertEqual([mock_event], handler2.events)
+
+        sut.flush()
+        self.assertEqual([mock_event], handler1.events)
+
+        sut.remove_handler(handler2)
+        sut.handle(MagicMock())
+        self.assertEqual([mock_event], handler2.events)

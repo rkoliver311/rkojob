@@ -15,7 +15,9 @@ from rkojob.events import (
     JobFinishItemEvent,
     JobFinishScopeEvent,
     JobFinishSectionEvent,
+    JobForkContextEvent,
     JobInfoEvent,
+    JobJoinContextEvent,
     JobOutputEvent,
     JobSkipScopeEvent,
     JobStartItemEvent,
@@ -316,6 +318,26 @@ class TestJobStatusWriter(TestCase):
         self.assertEqual(["error1", "error2", "error3"], sut._get_errors(ScopeFinishEntry))
         self.assertEqual(["error1"], sut._get_errors(ScopeFinishEntry, include_children=False))
         sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=scope))
+
+    def test_fork_context(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+        forked_context = MagicMock()
+
+        sut.handle(JobForkContextEvent(mock_context, None, forked_context=forked_context))
+
+        self.assertEqual(f"*Forking context {mock_context} -> {forked_context}*\n\n", stream.getvalue())
+
+    def test_join_context(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+        joined_context = MagicMock()
+
+        sut.handle(JobJoinContextEvent(mock_context, None, joined_context=joined_context))
+
+        self.assertEqual(f"*Joining context {joined_context} -> {mock_context}*\n\n", stream.getvalue())
 
     def test_start_finish_scope(self) -> None:
         stream: StringIO = StringIO()

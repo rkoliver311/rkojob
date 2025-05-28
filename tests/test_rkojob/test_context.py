@@ -4,12 +4,14 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 from enum import Enum, auto
+from typing import cast
 from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import (
     Delegate,
     JobContext,
+    JobEvent,
     JobException,
     JobScopeStatus,
     Values,
@@ -432,3 +434,25 @@ class TestJobContextImpl(TestCase):
     def test_get_report(self) -> None:
         sut = JobContextImpl()
         self.assertEqual({}, sut.get_report())
+
+    def test_fork_join(self) -> None:
+        class StubHandler:
+            def __init__(self) -> None:
+                self.events: list[JobEvent] = []
+
+            def handle(self, event: JobEvent) -> None:
+                self.events.append(event)
+
+        sut = JobContextImpl()
+        with sut.events.scope(StubScope("scope", "type")):
+            handler = StubHandler()
+            sut._shared_state.events.add_handler(handler)
+            fork = cast(JobContextImpl, sut.fork())
+            self.assertIs(fork._shared_state, sut._shared_state)
+            self.assertIsNot(fork._scope_stack, sut._scope_stack)
+
+            fork.events.info("Hello!")
+            self.assertEqual([], handler.events)
+
+            fork.join()
+            self.assertEqual([{"message": "Hello!"}], [event.data for event in handler.events])

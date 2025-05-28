@@ -32,6 +32,7 @@ from rkojob.events import (
     JobDirectEventDispatcher,
     JobErrorEvent,
     JobFinishScopeEvent,
+    JobLocalEventDispatcher,
     JobSkipScopeEvent,
     JobStartScopeEvent,
     JobStatusImpl,
@@ -119,35 +120,73 @@ class JobScopeStatuses(JobEventHandler):
             self._statuses[scope] = JobScopeStatus.FAILING
 
 
+class JobContextState:
+    def __init__(self, values: dict[str, Any] | None = None, status_writer: JobStatusWriter | None = None):
+        if values is None:
+            values = {}
+        self.values: Values = Values(**values)
+
+        self.events: JobEventDispatcher = JobDirectEventDispatcher()
+
+        self.scope_statuses: JobScopeStatuses = JobScopeStatuses()
+        self.events.add_handler(self.scope_statuses)
+
+        if status_writer:
+            self.events.add_handler(status_writer)
+
+
 class JobScopeState:
     def __init__(self) -> None:
         # Teardown actions registered ad-hoc
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True, reverse=True)
 
 
-class JobContextImpl(JobContext):
-    def __init__(self, *, values: dict[str, Any] | None = None, status_writer: JobStatusWriter | None = None) -> None:
+class JobContextImpl(JobContext, JobEventHandler):
+    def __init__(
+        self,
+        *,
+        values: dict[str, Any] | None = None,
+        status_writer: JobStatusWriter | None = None,
+        state: JobContextState | None = None,
+        events: JobEventDispatcher | None = None,
+    ) -> None:
+        # State shared by all contexts (global)
+        if state is None:
+            state = JobContextState(values, status_writer)
+        self._shared_state: JobContextState = state
+        self._shared_state.events.add_handler(self)
+
         # State that pushes and pops with the scope.
-        self._id: JobIdType = create_context_id()
         self._scope_stack: JobScopeStack[JobScope, JobScopeState] = JobScopeStack(default_factory=JobScopeState)
 
-        if values is None:
-            values = {}
-        self._values: Values = Values(**values)
-
-        self._events: JobEventDispatcher = JobDirectEventDispatcher()
-        self._events.add_handler(self)
-        self._status: JobStatus = JobStatusImpl(self._events, self)
-
-        self._scope_statuses: JobScopeStatuses = JobScopeStatuses()
-        self._events.add_handler(self._scope_statuses)
-
-        if status_writer:
-            self._events.add_handler(status_writer)
+        # State that extends beyond scope boundaries but is not shared between contexts
+        self._id: JobIdType = create_context_id()
+        self._local_events: JobEventDispatcher = events or self._shared_state.events
+        self._status: JobStatusImpl = JobStatusImpl(self._local_events, self)
 
     @property
     def id(self) -> JobIdType:
         return self._id
+
+    def fork(self) -> JobContextImpl:
+        # Create a "local" dispatcher that the forked context will send events to.
+        local_events: JobLocalEventDispatcher = JobLocalEventDispatcher(self._local_events)
+
+        # Pass it into the constructor to override the global dispatcher
+        forked: JobContextImpl = type(self)(events=local_events, state=self._shared_state)
+
+        # Add forked as a handler of its own events
+        local_events.add_handler(forked)
+
+        forked._scope_stack = self._scope_stack.fork()
+        forked._status = JobStatusImpl(local_events, forked)
+
+        return forked
+
+    def join(self) -> None:
+        if isinstance(self._local_events, JobLocalEventDispatcher):
+            # Flush our local events to the parent context's events (typically global).
+            self._local_events.flush()
 
     def handle(self, event: JobEvent):
         if event.context.id == self.id:
@@ -270,10 +309,10 @@ class JobContextImpl(JobContext):
         return self._status
 
     def get_report(self, scope: JobScopeID | None = None) -> dict[JobScopeID, Any]:
-        return self._scope_statuses.get_report(scope)
+        return self._shared_state.scope_statuses.get_report(scope)
 
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus:
-        return self._scope_statuses.get_status(scope)
+        return self._shared_state.scope_statuses.get_status(scope)
 
     def error(self, error: str | Exception) -> Exception:
         """
@@ -296,9 +335,9 @@ class JobContextImpl(JobContext):
         """
         return [
             Exception(error) if not isinstance(error, Exception) else error
-            for error in self._scope_statuses.get_errors(scope)
+            for error in self._shared_state.scope_statuses.get_errors(scope)
         ]
 
     @property
     def values(self) -> Values:
-        return self._values
+        return self._shared_state.values

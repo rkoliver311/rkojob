@@ -3,7 +3,8 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-from typing import Any, cast
+from contextlib import contextmanager
+from typing import Any, Generator, cast
 
 import yaml
 
@@ -92,15 +93,28 @@ class JobRunnerImpl:
             context.events.skip_scope(scope, reason=skip_reason or None)
             return
 
-        with context.events.scope(scope):
+        with self._fork_if_needed(context, scope) as forked_context, forked_context.events.scope(scope):
             try:
                 if group:
-                    self._run_group(context, group)
+                    self._run_group(forked_context, group)
                 elif action:
-                    self._run_action(context, action)
+                    self._run_action(forked_context, action)
             finally:
                 if teardown:
-                    self._run_teardown(context, teardown)
+                    self._run_teardown(forked_context, teardown)
+
+    @contextmanager
+    def _fork_if_needed(self, context: JobContext, scope: JobScope) -> Generator[JobContext, None, None]:
+        if scope.concurrent:
+            forked_context: JobContext = context.fork()
+            context.events.fork_context(forked_context)
+            try:
+                yield forked_context
+            finally:
+                context.events.join_context(forked_context)
+                forked_context.join()
+        else:
+            yield context
 
     def _run_group(self, context: JobContext, group: JobGroupScope) -> None:
         # Recursively run a group's child scopes
