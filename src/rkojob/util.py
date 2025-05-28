@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 from os import PathLike
-from typing import IO, Any, Iterable
+from typing import IO, Any, Iterable, TypeVar
 
 
 class ShellResult:
@@ -344,3 +344,12 @@ def deep_flatten(xs: Iterable[Any]) -> Iterable[Any]:
             yield from deep_flatten(x)
         else:
             yield x
+
+
+T = TypeVar("T")
+
+
+def not_none(value: T | None, name: str | None = None) -> T:
+    if value is None:
+        raise ValueError(f"{name if name else 'Value'} must not be {None}.")
+    return value

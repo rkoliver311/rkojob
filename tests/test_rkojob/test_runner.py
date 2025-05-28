@@ -20,6 +20,7 @@ from rkojob import (
 from rkojob.delegates import Delegate
 from rkojob.factories import JobContextFactory
 from rkojob.runner import JobRunnerImpl
+from rkojob.util import not_none
 
 
 class StubScope:
@@ -125,7 +126,7 @@ class TestJobRunnerImpl(TestCase):
 
             def action(self, context: JobContext) -> None:
                 self._side_effects.append("Action!")
-                context.add_teardown(context.get_scope(generation=1), self._clean_up)
+                context.add_teardown(not_none(context.get_scope(generation=1)), self._clean_up)
 
             def _clean_up(self, context: JobContext) -> None:
                 self._side_effects.append(f"Teardown {context.scope}!")
@@ -231,9 +232,9 @@ class TestJobRunnerImpl(TestCase):
             if teardown:
                 context.add_teardown(context.scope, teardown)
             if parent_teardown:
-                context.add_teardown(context.get_scope(generation=1), parent_teardown)
+                context.add_teardown(not_none(context.get_scope(generation=1), name="Parent scope"), parent_teardown)
             if root_teardown:
-                context.add_teardown(context.get_scope(generation=-1), root_teardown)
+                context.add_teardown(not_none(context.get_scope(generation=-1), name="Root scope"), root_teardown)
 
             if fail:
                 raise Exception(f"Action failed: {'->'.join([scope.name for scope in context.scopes])}")

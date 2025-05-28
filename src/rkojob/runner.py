@@ -56,7 +56,7 @@ class JobRunnerImpl:
             context.events.skip_scope(scope, reason=skip_reason or None)
             return
 
-        with context.in_scope(scope), context.events.scope(scope):
+        with context.events.scope(scope):
             try:
                 if group:
                     self._run_group(context, group)
