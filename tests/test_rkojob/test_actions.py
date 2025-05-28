@@ -18,8 +18,8 @@ from rkojob.util import ShellException, ShellResult
 class TestShellAction(TestCase):
     def make_context(self) -> JobContext:
         context = MagicMock(spec=JobContext)
-        context.status.section = MagicMock()
-        context.status.output = MagicMock()
+        context.events.section = MagicMock()
+        context.events.output = MagicMock()
         return context
 
     @patch("rkojob.actions.Shell")
@@ -33,8 +33,8 @@ class TestShellAction(TestCase):
         sut.action(context)
 
         expected_command = shlex.join(("echo", "ok"))
-        context.status.section.assert_called_once_with(f"Executing {expected_command}")
-        context.status.output.assert_called_once_with("ok", label="stdout")
+        context.events.section.assert_called_once_with(f"Executing {expected_command}")
+        context.events.output.assert_called_once_with("ok", label="stdout")
         self.assertEqual(shell_result, sut.result.get())
 
     @patch("rkojob.actions.Shell")
@@ -49,8 +49,8 @@ class TestShellAction(TestCase):
         sut = ShellAction("explode", result=result_ref)
         sut.action(context)
 
-        context.status.error.assert_called_once_with(exception)
-        context.status.output.assert_called_once_with("boom", label="stderr")
+        context.events.error.assert_called_once_with(exception)
+        context.events.output.assert_called_once_with("boom", label="stderr")
         self.assertEqual(result, result_ref.value)
 
     @patch("rkojob.actions.Shell")
@@ -67,8 +67,8 @@ class TestShellAction(TestCase):
             sut.action(context)
         self.assertEqual("boom", str(e.exception))
 
-        context.status.error.assert_not_called()
-        context.status.output.assert_called_once_with("boom", label="stderr")
+        context.events.error.assert_not_called()
+        context.events.output.assert_called_once_with("boom", label="stderr")
         self.assertEqual(result, result_ref.value)
 
     @patch("rkojob.actions.Shell")
@@ -81,7 +81,7 @@ class TestShellAction(TestCase):
         action = ShellAction("nothing", result=result_ref)
         action.action(context)
 
-        context.status.output.assert_not_called()
+        context.events.output.assert_not_called()
         self.assertFalse(result_ref.has_value)
 
 
@@ -116,8 +116,11 @@ class TestVerifyTestStructure(TestCase):
             (test_foo_bar_path / "test_bar.py").touch()
 
             sut = VerifyTestStructure(src_path=src_path, tests_path=tests_path)
-            with self.assertRaises(JobException) as e:
-                sut.action(JobContextFactory.create())
+            context = JobContextFactory.create()
+            mock_scope = MagicMock()
+            with context.in_scope(mock_scope), context.events.scope(mock_scope):
+                with self.assertRaises(JobException) as e:
+                    sut.action(context)
             self.assertEqual(
                 "Missing tests: [\"Test path for source path 'foo/baz.py' not found: test_foo/test_baz.py\"]",
                 str(e.exception),

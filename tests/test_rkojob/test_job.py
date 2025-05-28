@@ -195,7 +195,7 @@ class TestJobStepBuilder(TestCase):
         sut = JobStepBuilder("step")
         condition = scope_failing(sut)
         scope = sut.build()
-        with context.in_scope(scope), context.status.scope(scope):
+        with context.in_scope(scope), context.events.scope(scope):
             context.error("boom")
         self.assertEqual((True, "Step step has failures."), condition(context))
 

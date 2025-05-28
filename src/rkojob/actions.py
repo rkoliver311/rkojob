@@ -50,7 +50,7 @@ class ShellAction(JobAction):
         command: str = shlex.join(args)
 
         result: ShellResult | None = None
-        with context.status.section(f"Executing {command}"):
+        with context.events.section(f"Executing {command}"):
             try:
                 result = shell(*args)
             except ShellException as e:
@@ -59,14 +59,14 @@ class ShellAction(JobAction):
                     raise
                 else:
                     # Record the error instead of raising it
-                    context.status.error(e)
+                    context.events.error(e)
             finally:
                 if result:
                     assign_value(self.result, result)
                     if result.stdout:
-                        context.status.output(result.stdout, label="stdout")
+                        context.events.output(result.stdout, label="stdout")
                     if result.stderr:
-                        context.status.output(result.stderr, label="stderr")
+                        context.events.output(result.stderr, label="stderr")
                 else:
                     unassign_value(self.result)
 
@@ -126,7 +126,7 @@ class VerifyTestStructure(JobAction):
         child: Path
         for child in source_dir.iterdir():
             if self._skip(child):
-                context.status.detail(f"Skipping {child}")
+                context.events.detail(f"Skipping {child}")
                 continue
 
             if child.is_dir():
@@ -134,12 +134,12 @@ class VerifyTestStructure(JobAction):
             else:
                 expected_test_path: Path | None = self._expected_test_path(src_path, tests_path, child)
                 if expected_test_path is None:  # pragma: no cover
-                    context.status.detail(f"Skipping {child}")
+                    context.events.detail(f"Skipping {child}")
                     continue
 
-                context.status.start_item(str(child.relative_to(src_path)))
+                context.events.start_item(str(child.relative_to(src_path)))
                 error: str | None = "missing" if not expected_test_path.exists() else None
-                context.status.finish_item(str(expected_test_path.relative_to(tests_path)), error=error)
+                context.events.finish_item(str(expected_test_path.relative_to(tests_path)), error=error)
 
                 if error:
                     message: str = (

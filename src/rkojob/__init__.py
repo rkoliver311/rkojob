@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from contextlib import contextmanager
 from copy import copy
+from datetime import datetime
 from enum import Enum, auto
 from typing import (
     Any,
@@ -50,71 +51,68 @@ class JobException(Exception):
     pass
 
 
-class JobStatus(Protocol):
-    def start_scope(self, scope: JobScope) -> None: ...
+class JobEvent:
+    type: str
 
-    def finish_scope(self, scope: JobScope | None = None) -> None: ...
+    def __init__(self, context: JobContextID, scope: JobScopeID | None, **data) -> None:
+        self.context: JobContextID = context
+        self.scope: JobScopeID | None = scope
+        self.timestamp: datetime = datetime.now()
+        self.data: dict[str, Any] = data
 
-    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None: ...
 
-    def start_section(self, name: str) -> None: ...
+class JobEventHandler(Protocol):
+    def handle(self, event: JobEvent): ...
 
-    def finish_section(self, name: str | None = None) -> None: ...
 
+class JobEventDispatcher(JobEventHandler, Protocol):
+    def add_handler(self, handler: JobEventHandler) -> None: ...
+    def remove_handler(self, handler: JobEventHandler) -> None: ...
+
+
+class JobStatus(JobEventHandler, ABC):
+    """
+    Convenience protocol which defines methods for well-known JobEvents
+    """
+
+    @abstractmethod
+    def start_scope(self, scope: JobScopeID) -> None: ...
+
+    @abstractmethod
+    def finish_scope(self, scope: JobScopeID | None = ...) -> None: ...
+
+    @abstractmethod
+    def skip_scope(self, scope: JobScopeID, reason: str | None = ...) -> None: ...
+
+    @abstractmethod
+    def start_section(self, section: str) -> None: ...
+
+    @abstractmethod
+    def finish_section(self, section: str) -> None: ...
+
+    @abstractmethod
     def start_item(self, description: str) -> None: ...
 
-    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None: ...
+    @abstractmethod
+    def finish_item(self, outcome: str = ..., error: str | Exception | None = ...) -> None: ...
 
+    @abstractmethod
     def info(self, info: str) -> None: ...
 
+    @abstractmethod
     def detail(self, detail: str) -> None: ...
 
+    @abstractmethod
     def error(self, error: Exception | str) -> None: ...
 
+    @abstractmethod
     def warning(self, warning: Exception | str) -> None: ...
 
-    def output(self, output: str | Iterable[str], label: str | None = None) -> None: ...
-
-
-class JobBaseStatus(JobStatus):
-    def start_scope(self, scope: JobScope) -> None:  # pragma: no cover
-        pass
-
-    def finish_scope(self, scope: JobScope | None = None) -> None:  # pragma: no cover
-        pass
-
-    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None:  # pragma: no cover
-        pass
-
-    def start_section(self, name: str) -> None:  # pragma: no cover
-        pass
-
-    def finish_section(self, name: str | None = None) -> None:  # pragma: no cover
-        pass
-
-    def start_item(self, description: str) -> None:  # pragma: no cover
-        pass
-
-    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:  # pragma: no cover
-        pass
-
-    def info(self, info: str) -> None:  # pragma: no cover
-        pass
-
-    def detail(self, detail: str) -> None:  # pragma: no cover
-        pass
-
-    def error(self, error: Exception | str) -> None:  # pragma: no cover
-        pass
-
-    def warning(self, warning: Exception | str) -> None:  # pragma: no cover
-        pass
-
-    def output(self, output: str | Iterable[str], label: str | None = None) -> None:  # pragma: no cover
-        pass
+    @abstractmethod
+    def output(self, output: str | Iterable[str], label: str | None = ...) -> None: ...
 
     @contextmanager
-    def scope(self, scope: JobScope) -> Generator[None, Any, None]:
+    def scope(self, scope: JobScopeID) -> Generator[None, None, None]:
         try:
             self.start_scope(scope)
             yield
@@ -125,114 +123,26 @@ class JobBaseStatus(JobStatus):
             self.finish_scope(scope)
 
     @contextmanager
-    def section(self, name: str) -> Generator[None, Any, None]:
+    def section(self, section: str) -> Generator[None, None, None]:
         try:
-            self.start_section(name)
+            self.start_section(section)
             yield
         except Exception as e:
             self.error(e)
             raise
         finally:
-            self.finish_section(name)
+            self.finish_section(section)
 
     @contextmanager
-    def item(self, event: str) -> Generator[None, Any, None]:
+    def item(self, item: str) -> Generator[None, None, None]:
         try:
-            self.start_item(event)
+            self.start_item(item)
             yield
         except Exception as e:
             self.error(e)
             raise
         finally:
             self.finish_item()
-
-
-class JobStatusCollector:
-    def __init__(self) -> None:
-        pass
-
-    def add_listener(self, status_listener: JobStatus) -> None:
-        self.start_scope.add_callback(status_listener.start_scope)
-        self.finish_scope.add_callback(status_listener.finish_scope)
-        self.skip_scope.add_callback(status_listener.skip_scope)
-        self.start_section.add_callback(status_listener.start_section)
-        self.finish_section.add_callback(status_listener.finish_section)
-        self.start_item.add_callback(status_listener.start_item)
-        self.finish_item.add_callback(status_listener.finish_item)
-        self.info.add_callback(status_listener.info)
-        self.detail.add_callback(status_listener.detail)
-        self.error.add_callback(status_listener.error)
-        self.warning.add_callback(status_listener.warning)
-        self.output.add_callback(status_listener.output)
-
-    @contextmanager
-    def scope(self, scope: JobScope) -> Generator[None, Any, None]:
-        try:
-            self.start_scope(scope)
-            yield
-        except Exception as e:
-            self.error(e)
-            raise
-        finally:
-            self.finish_scope(scope)
-
-    @delegate
-    def start_scope(self, scope: JobScope): ...
-
-    @delegate
-    def finish_scope(self, scope: JobScope | None = None): ...
-
-    @delegate
-    def skip_scope(self, scope: JobScope | None = None): ...
-
-    @contextmanager
-    def section(self, name: str) -> Generator[None, Any, None]:
-        try:
-            self.start_section(name)
-            yield
-        except Exception as e:
-            self.error(e)
-            raise
-        finally:
-            self.finish_section(name)
-
-    @delegate
-    def start_section(self, name: str) -> None: ...
-
-    @delegate
-    def finish_section(self, name: str | None = None) -> None: ...
-
-    @contextmanager
-    def item(self, event: str) -> Generator[None, Any, None]:
-        try:
-            self.start_item(event)
-            yield
-        except Exception as e:
-            self.error(e)
-            raise
-        finally:
-            self.finish_item()
-
-    @delegate
-    def start_item(self, event: str) -> None: ...
-
-    @delegate
-    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None: ...
-
-    @delegate
-    def info(self, info: str) -> None: ...
-
-    @delegate
-    def detail(self, detail: str) -> None: ...
-
-    @delegate
-    def error(self, error: Exception | str) -> None: ...
-
-    @delegate
-    def warning(self, warning: Exception | str) -> None: ...
-
-    @delegate
-    def output(self, output: str | Iterable[str], label: str | None = None) -> None: ...
 
 
 class JobScopeStatus(Enum):
@@ -244,6 +154,16 @@ class JobScopeStatus(Enum):
     UNKNOWN = auto()
 
 
+JobContextID: TypeAlias = str
+
+
+def create_context_id() -> JobContextID:
+    """
+    Creates a new, unique context ID value.
+    """
+    return JobContextID(uuid4())
+
+
 class JobContext(Protocol):
     """
     Execution context for a running job.
@@ -253,6 +173,8 @@ class JobContext(Protocol):
     raised during execution.
     """
 
+    @property
+    def id(self) -> JobContextID: ...
     @contextmanager
     def in_scope(self, scope: JobScope) -> Generator[JobScope, None, None]: ...
 
@@ -287,7 +209,7 @@ class JobContext(Protocol):
     @property
     def values(self) -> Values: ...
     @property
-    def status(self) -> JobStatusCollector: ...
+    def events(self) -> JobStatus: ...
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
 
     """
