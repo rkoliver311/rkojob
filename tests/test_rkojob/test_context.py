@@ -119,26 +119,36 @@ class StubScopeType(Enum):
 
 
 class TestJobContextImpl(TestCase):
-    def test_in_scope(self):
+    def test_push_pop_scope(self):
         sut = JobContextImpl()
-        mock_scope = MagicMock()
-        with sut.in_scope(mock_scope):
-            self.assertEqual(mock_scope, sut._scope_stack.scope)
-        self.assertEqual([], list(sut._scope_stack))
+        stub_scope = StubScope("scope", "type")
+        sut.push_scope(stub_scope)
+        self.assertIs(stub_scope, sut._scope_stack.scope)
+        sut.pop_scope()
+        self.assertFalse(sut._scope_stack)
+        with self.assertRaises(JobException) as e:
+            sut.pop_scope()
+        self.assertEqual("Scope stack underflow.", str(e.exception))
+
+    def test_start_finish_scope_react(self):
+        sut = JobContextImpl()
+        stub_scope = StubScope("scope", "type")
+        with sut.events.scope(stub_scope):
+            self.assertIs(stub_scope, sut._scope_stack.scope)
+        self.assertFalse(sut._scope_stack)
 
     def test_scope(self):
         sut = JobContextImpl()
-        mock_scope_1 = MagicMock()
-        mock_scope_1.name = "scope_1"
-        mock_scope_2 = MagicMock()
-        mock_scope_2.name = "scope_2"
-        with sut.in_scope(mock_scope_1):
-            self.assertIs(mock_scope_1, sut.scope)
+        stub_scope_1 = StubScope("scope_1", "type")
+        stub_scope_2 = StubScope("scope_2", "type")
 
-            with sut.in_scope(mock_scope_2):
-                self.assertIs(mock_scope_2, sut.scope)
+        with sut.events.scope(stub_scope_1):
+            self.assertIs(stub_scope_1, sut.scope)
 
-            self.assertIs(mock_scope_1, sut.scope)
+            with sut.events.scope(stub_scope_2):
+                self.assertIs(stub_scope_2, sut.scope)
+
+            self.assertIs(stub_scope_1, sut.scope)
 
     def test_get_scope(self) -> None:
         class StubScopeID:
@@ -147,52 +157,44 @@ class TestJobContextImpl(TestCase):
 
         sut = JobContextImpl()
 
+        self.assertIsNone(sut.get_scope())
+
+        stub_scope_1 = StubScope("scope_1", "type", id="scope_id")
+        sut.push_scope(stub_scope_1)
+        self.assertIs(stub_scope_1, sut.get_scope())
+        self.assertIs(stub_scope_1, sut.get_scope(StubScopeID("scope_id")))
+
+        # generation == 0: current scope
+        self.assertIs(stub_scope_1, sut.get_scope(generation=0))
+        # generation == -1: root scope
+        self.assertIs(stub_scope_1, sut.get_scope(generation=-1))
+
+        stub_scope_2 = StubScope("scope_2", "type")
+
+        sut.push_scope(stub_scope_2)
+        self.assertIs(stub_scope_1, sut.get_scope(generation=1))
+        self.assertIs(stub_scope_1, sut.get_scope(generation=-1))
+
+        stub_scope_3 = StubScope("scope_3", "type")
+
+        sut.push_scope(stub_scope_3)
+        self.assertIs(stub_scope_3, sut.get_scope())
+        self.assertIs(stub_scope_2, sut.get_scope(generation=1))
+        self.assertIs(stub_scope_1, sut.get_scope(generation=2))
+        self.assertIs(stub_scope_1, sut.get_scope(generation=-1))
+        self.assertIs(stub_scope_2, sut.get_scope(generation=-2))
+
         with self.assertRaises(JobException) as e:
-            _ = sut.get_scope()
-        self.assertEqual("Scope stack underflow.", str(e.exception))
+            _ = sut.get_scope(stub_scope_3, generation=-4)
+        self.assertEqual("Unable to get scope relative to root using generation=-4", str(e.exception))
 
-        mock_scope_1 = MagicMock()
-        mock_scope_1.name = "scope_1"
-        mock_scope_1.id = "scope_id"
-        with sut.in_scope(mock_scope_1):
-            self.assertIs(mock_scope_1, sut.get_scope())
-            self.assertIs(mock_scope_1, sut.get_scope(StubScopeID("scope_id")))
+        self.assertIsNone(sut.get_scope(stub_scope_3, generation=3))
 
-            # generation == 0: current scope
-            self.assertIs(mock_scope_1, sut.get_scope(generation=0))
-            # generation == -1: root scope
-            self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
+        sut.pop_scope()
 
-            mock_scope_2 = MagicMock()
-            mock_scope_2.name = "scope_2"
-
-            with sut.in_scope(mock_scope_2):
-                self.assertIs(mock_scope_1, sut.get_scope(generation=1))
-                self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
-
-                mock_scope_3 = MagicMock()
-                mock_scope_3.name = "scope_3"
-
-                with sut.in_scope(mock_scope_3):
-                    self.assertIs(mock_scope_3, sut.get_scope())
-                    self.assertIs(mock_scope_2, sut.get_scope(generation=1))
-                    self.assertIs(mock_scope_1, sut.get_scope(generation=2))
-                    self.assertIs(mock_scope_1, sut.get_scope(generation=-1))
-                    self.assertIs(mock_scope_2, sut.get_scope(generation=-2))
-
-                    with self.assertRaises(JobException) as e:
-                        _ = sut.get_scope(mock_scope_3, generation=-4)
-                    self.assertEqual("Unable to get scope relative to root using generation=-4", str(e.exception))
-
-                    with self.assertRaises(JobException) as e:
-                        _ = sut.get_scope(mock_scope_3, generation=3)
-                    self.assertEqual(
-                        f"Unable to get scope relative to {mock_scope_3} using generation=3", str(e.exception)
-                    )
-
-                with self.assertRaises(JobException) as e:
-                    _ = sut.get_scope(mock_scope_3, generation=1)
-                self.assertEqual(f"Scope '{mock_scope_3}' is not in scope", str(e.exception))
+        with self.assertRaises(JobException) as e:
+            _ = sut.get_scope(stub_scope_3, generation=1)
+        self.assertEqual(f"Scope '{stub_scope_3}' is not in scope", str(e.exception))
 
     def test_resolve_scope(self) -> None:
         class StubScopeID:
@@ -208,8 +210,9 @@ class TestJobContextImpl(TestCase):
             _ = sut._resolve_scope(stub_scope_id)
         self.assertEqual("Scope with ID 'scope_id' is not known to this context.", str(e.exception))
 
-        with sut.in_scope(mock_scope):
-            self.assertEqual(mock_scope, sut._resolve_scope(stub_scope_id))
+        sut.push_scope(mock_scope)
+        self.assertEqual(mock_scope, sut._resolve_scope(stub_scope_id))
+        sut.pop_scope()
 
         # resolves even after leaving scope
         self.assertEqual(mock_scope, sut._resolve_scope(stub_scope_id))
@@ -223,12 +226,18 @@ class TestJobContextImpl(TestCase):
         mock_scope_3.name = "scope_3"
 
         sut = JobContextImpl()
-        with sut.in_scope(mock_scope_1):
-            with sut.in_scope(mock_scope_2):
-                with sut.in_scope(mock_scope_3):
-                    self.assertEqual((mock_scope_1, mock_scope_2, mock_scope_3), sut.scopes)
-                self.assertEqual((mock_scope_1, mock_scope_2), sut.scopes)
-            self.assertEqual((mock_scope_1,), sut.scopes)
+        sut.push_scope(mock_scope_1)
+        sut.push_scope(mock_scope_2)
+        sut.push_scope(mock_scope_3)
+        self.assertEqual((mock_scope_1, mock_scope_2, mock_scope_3), sut.scopes)
+
+        sut.pop_scope()
+        self.assertEqual((mock_scope_1, mock_scope_2), sut.scopes)
+
+        sut.pop_scope()
+        self.assertEqual((mock_scope_1,), sut.scopes)
+
+        sut.pop_scope()
         self.assertEqual(tuple(), sut.scopes)
 
     def test_teardown(self) -> None:
@@ -249,42 +258,43 @@ class TestJobContextImpl(TestCase):
             sut.get_teardown(scope)
         self.assertEqual(f"Scope {scope} is not an active scope.", str(e.exception))
 
-        with sut.in_scope(scope):
-            sut.add_teardown(scope, callback)
-            self.assertEqual([callback], sut._scope_stack[scope].teardown._callbacks)
+        sut.push_scope(scope)
+        sut.add_teardown(scope, callback)
+        self.assertEqual([callback], sut._scope_stack[scope].teardown._callbacks)
 
-            sut.remove_teardown(scope, callback)
-            self.assertEqual([], sut._scope_stack[scope].teardown._callbacks)
+        sut.remove_teardown(scope, callback)
+        self.assertEqual([], sut._scope_stack[scope].teardown._callbacks)
+        sut.pop_scope()
 
         class NonTeardownScope:
             name = "scope"
             type = StubScopeType.JOB
             id = "id"
 
-        with sut.in_scope(NonTeardownScope()) as non_teardown_scope:
-            with self.assertRaises(JobException) as e:
-                sut.add_teardown(non_teardown_scope, callback)
-            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
-            with self.assertRaises(JobException) as e:
-                sut.remove_teardown(non_teardown_scope, callback)
-            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
-            with self.assertRaises(JobException) as e:
-                sut.get_teardown(non_teardown_scope)
-            self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+        non_teardown_scope = NonTeardownScope()
+        sut.push_scope(non_teardown_scope)
+        with self.assertRaises(JobException) as e:
+            sut.add_teardown(non_teardown_scope, callback)
+        self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+        with self.assertRaises(JobException) as e:
+            sut.remove_teardown(non_teardown_scope, callback)
+        self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
+        with self.assertRaises(JobException) as e:
+            sut.get_teardown(non_teardown_scope)
+        self.assertEqual(f"Scope {non_teardown_scope} does not support teardown.", str(e.exception))
 
     def test_get_scope_status(self) -> None:
         sut = JobContextImpl()
-        with sut.in_scope(MagicMock()) as mock_scope:
-            sut.events.start_scope(mock_scope)
+        stub_scope = StubScope("name", "type")
+        with sut.events.scope(stub_scope):
             sut.events.error("error")
-            self.assertEqual(JobScopeStatus.FAILING, sut.get_scope_status(mock_scope))
-            sut.events.finish_scope(mock_scope)
-            self.assertEqual(JobScopeStatus.FAILED, sut.get_scope_status(mock_scope))
+            self.assertEqual(JobScopeStatus.FAILING, sut.get_scope_status(stub_scope))
+        self.assertEqual(JobScopeStatus.FAILED, sut.get_scope_status(stub_scope))
 
     def test_error(self):
         sut = JobContextImpl()
-        mock_scope = MagicMock()
-        with sut.in_scope(mock_scope), sut.events.scope(mock_scope):
+        stub_scope = StubScope("name", "type")
+        with sut.events.scope(stub_scope):
             self.assertEqual("JobException('Foo')", repr(sut.error("Foo")))
             bar_exception = Exception("Bar")
             self.assertEqual(bar_exception, sut.error(bar_exception))
@@ -298,28 +308,25 @@ class TestJobContextImpl(TestCase):
         buz_error = Exception("Buz")
         boz_error = Exception("Boz")
 
-        mock_scope_0 = MagicMock()
-        sut.events.start_scope(mock_scope_0)
+        stub_scope_0 = StubScope("stub_scope_0", "type")
+        with sut.events.scope(stub_scope_0):
 
-        sut.events.error(foo_error)
-        sut.events.error(bar_error)
+            sut.events.error(foo_error)
+            sut.events.error(bar_error)
 
-        mock_scope_1 = MagicMock()
-        sut.events.start_scope(mock_scope_1)
-        sut.events.error(baz_error)
+            stub_scope_1 = StubScope("stub_scope_1", "type")
+            with sut.events.scope(stub_scope_1):
+                sut.events.error(baz_error)
 
-        mock_scope_2 = MagicMock()
-        sut.events.start_scope(mock_scope_2)
-        sut.events.error(buz_error)
-        sut.events.finish_scope(mock_scope_2)
+                stub_scope_2 = StubScope("stub_scope_2", "type")
+                with sut.events.scope(stub_scope_2):
+                    sut.events.error(buz_error)
 
-        sut.events.error(boz_error)
-        sut.events.finish_scope(mock_scope_1)
-        sut.events.finish_scope(mock_scope_0)
+                sut.events.error(boz_error)
 
         self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_errors())
-        self.assertEqual([baz_error, boz_error, buz_error], sut.get_errors(mock_scope_1))
-        self.assertEqual([buz_error], sut.get_errors(mock_scope_2))
+        self.assertEqual([baz_error, boz_error, buz_error], sut.get_errors(stub_scope_1))
+        self.assertEqual([buz_error], sut.get_errors(stub_scope_2))
 
     def test_values(self) -> None:
         sut = JobContextImpl()

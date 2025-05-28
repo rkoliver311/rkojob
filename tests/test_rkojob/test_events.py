@@ -6,7 +6,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from rkojob import JobEvent, create_context_id, create_scope_id
+from rkojob import JobEvent, JobScopeStack, create_context_id, create_scope_id
 from rkojob.events import (
     JobDetailEvent,
     JobDirectEventDispatcher,
@@ -28,6 +28,42 @@ from rkojob.events import (
 class StubContext:
     def __init__(self):
         self.id = create_context_id()
+        self._scopes = JobScopeStack()
+
+    def handle(self, event):
+        if event.context == self.id:
+            if isinstance(event, JobStartScopeEvent):
+                self._scopes.push(event.started_scope)
+            elif isinstance(event, JobFinishScopeEvent):
+                self._scopes.pop()
+
+    @property
+    def scope(self):
+        return self._scopes.scope
+
+    def get_scope(self, scope=None, generation=0):
+        if scope and generation:
+            path = self._scopes.path_to(scope)
+            if generation >= len(path):
+                return None
+            index = -1 - generation
+            return path[index]
+        return self._scopes.get_scope()
+
+
+class StubDispatcher:
+    def __init__(self):
+        self.handlers = []
+
+    def add_handler(self, handler):
+        self.handlers.append(handler)
+
+    def remove_handler(self, handler):
+        self.handlers.remove(handler)
+
+    def handle(self, event):
+        for handler in self.handlers:
+            handler.handle(event)
 
 
 class StubScope:
@@ -42,7 +78,12 @@ class TestJobStatusImpl(TestCase):
         stub_context = StubContext()
         stub_scope = StubScope("scope-name")
         mock_handler = MagicMock()
-        sut = JobStatusImpl(mock_handler, stub_context)  # type: ignore[arg-type]
+
+        stub_handler = StubDispatcher()
+        stub_handler.add_handler(stub_context)
+        stub_handler.add_handler(mock_handler)
+
+        sut = JobStatusImpl(stub_handler, stub_context)  # type: ignore[arg-type]
 
         return stub_context, stub_scope, mock_handler, sut
 
@@ -84,6 +125,17 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_scope(mock_scope)
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope
+        )
+
+    def test_finish_scope_no_scope(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.finish_scope()
         self.assertHandledEvent(
             mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope
         )

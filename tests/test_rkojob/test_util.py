@@ -15,6 +15,7 @@ from rkojob.util import (
     ToolBuilder,
     ToolRunner,
     deep_flatten,
+    not_none,
     to_camel,
     to_kebab,
 )
@@ -229,3 +230,19 @@ class TestToolRunner(TestCase):
 class TestDeepFlatten(TestCase):
     def test(self) -> None:
         self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 0], list(deep_flatten([1, [2, [3, 4, 5], [6, 7], 8], 9, 0])))
+
+
+class TestNotNone(TestCase):
+    def test_with_none(self) -> None:
+        with self.assertRaises(ValueError) as e:
+            _ = not_none(None)
+        self.assertEqual("Value must not be None.", str(e.exception))
+
+    def test_with_name(self) -> None:
+        with self.assertRaises(ValueError) as e:
+            _ = not_none(None, name="Foo")
+        self.assertEqual("Foo must not be None.", str(e.exception))
+
+    def test_with_value(self) -> None:
+        foo = "Foo"
+        self.assertIs(foo, not_none(foo))

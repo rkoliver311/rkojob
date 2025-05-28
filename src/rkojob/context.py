@@ -5,10 +5,8 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import (
     Any,
-    Generator,
     Tuple,
 )
 
@@ -116,6 +114,7 @@ class JobContextImpl(JobContext):
         self._values: Values = Values(**values)
 
         self._events: JobEventDispatcher = JobDirectEventDispatcher()
+        self._events.add_handler(self)
         self._status: JobStatus = JobStatusImpl(self._events, self)
 
         self._scope_statuses: JobScopeStatuses = JobScopeStatuses()
@@ -128,28 +127,30 @@ class JobContextImpl(JobContext):
     def id(self) -> JobContextID:
         return self._id
 
-    @contextmanager
-    def in_scope(self, scope: JobScope) -> Generator[JobScope, None, None]:
-        """
-        Enter into *scope* for the duration of the ``with`` block.
+    def handle(self, event: JobEvent):
+        if event.context == self.id:
+            if isinstance(event, JobStartScopeEvent):
+                self.push_scope(self._resolve_scope(event.started_scope))
+            elif isinstance(event, JobFinishScopeEvent):
+                self.pop_scope()
 
-        :param scope: The scope to enter.
-        :yields: The same *scope* instance for convenience.
+    def push_scope(self, scope: JobScope) -> None:
         """
-        try:
-            self._enter_scope(scope)
-            yield scope
-        finally:
-            self._exit_scope(scope)
+        Push *scope* onto the context's scope stack.
 
-    def _enter_scope(self, scope: JobScope) -> None:
+        :param scope: The scope to push.
+        """
         self._scope_stack.push(scope)
         self._known_scopes[scope.id] = scope
 
-    def _exit_scope(self, scope: JobScope) -> None:
-        if scope is not self._scope_stack.scope:  # pragma: no cover
-            raise JobException("Unexpected scope found on stack!")
-        self._scope_stack.pop()
+    def pop_scope(self) -> JobScope:
+        """
+        Pop a scope from the context's scope stack and free any associated state.
+
+        :returns: The popped scope
+        """
+        scope, _ = self._scope_stack.pop()
+        return scope
 
     @property
     def scope(self) -> JobScope:
@@ -189,7 +190,7 @@ class JobContextImpl(JobContext):
             raise JobException(f"Scope {scope} is not an active scope.")
         return self._scope_stack[scope].teardown
 
-    def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope:
+    def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope | None:
         """
         Resolve a scope relative to another, where generation=0 is the same scope,
         generation=1 is the parent, etc.
@@ -200,7 +201,7 @@ class JobContextImpl(JobContext):
         """
         if generation == 0:
             if scope is None:
-                return self.scope
+                return self._scope_stack.get_scope()
             return self._resolve_scope(scope)
 
         scope_index: int
@@ -220,11 +221,13 @@ class JobContextImpl(JobContext):
                     raise JobException(f"Scope '{scope}' is not in scope")
 
         scope_index -= generation
-        if scope_index < 0 or scope_index >= len(scopes):
+        if scope_index < 0:
+            return None
+
+        if scope_index >= len(scopes):
             raise JobException(
                 f"Unable to get scope relative to {'root' if generation < 0 else scope} using generation={generation}"
             )
-
         return scopes[scope_index]
 
     def _resolve_scope(self, scope_id: JobScopeID) -> JobScope:

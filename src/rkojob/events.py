@@ -13,7 +13,6 @@ from rkojob import (
     JobEventHandler,
     JobException,
     JobScopeID,
-    JobScopeStack,
     JobStatus,
     delegate,
 )
@@ -171,50 +170,51 @@ class JobStatusImpl(JobStatus):
     def __init__(self, handler: JobEventHandler, context: JobContext) -> None:
         self._handler: JobEventHandler = handler
         self._context: JobContext = context
-        self._scopes: JobScopeStack[JobScopeID, None] = JobScopeStack()
 
     def handle(self, event: JobEvent) -> None:
         self._handler.handle(event)
 
     def start_scope(self, scope: JobScopeID) -> None:
-        self.handle(JobStartScopeEvent(self._context.id, self._scopes.get_scope(), started_scope=scope))
-        self._scopes.push(scope)
+        self.handle(JobStartScopeEvent(self._context.id, self._context.get_scope(), started_scope=scope))
 
     def finish_scope(self, scope: JobScopeID | None = None) -> None:
-        scope, _ = self._scopes.pop()
-        self.handle(JobFinishScopeEvent(self._context.id, self._scopes.get_scope(), finished_scope=scope))
+        if scope is None:
+            scope = self._context.scope
+        self.handle(
+            JobFinishScopeEvent(self._context.id, self._context.get_scope(scope, generation=1), finished_scope=scope)
+        )
 
     def skip_scope(self, scope: JobScopeID, reason: str | None = None) -> None:
-        self.handle(JobSkipScopeEvent(self._context.id, self._scopes.get_scope(), skipped_scope=scope, reason=reason))
+        self.handle(JobSkipScopeEvent(self._context.id, self._context.get_scope(), skipped_scope=scope, reason=reason))
 
     def start_section(self, section: str) -> None:
-        self.handle(JobStartSectionEvent(self._context.id, self._scopes.scope, section=section))
+        self.handle(JobStartSectionEvent(self._context.id, self._context.scope, section=section))
 
     def finish_section(self, section: str) -> None:
-        self.handle(JobFinishSectionEvent(self._context.id, self._scopes.scope, section=section))
+        self.handle(JobFinishSectionEvent(self._context.id, self._context.scope, section=section))
 
     def start_item(self, item: str) -> None:
-        self.handle(JobStartItemEvent(self._context.id, self._scopes.scope, item=item))
+        self.handle(JobStartItemEvent(self._context.id, self._context.scope, item=item))
 
     def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:
         if error:
             self.error(error)
-        self.handle(JobFinishItemEvent(self._context.id, self._scopes.scope, outcome=outcome))
+        self.handle(JobFinishItemEvent(self._context.id, self._context.scope, outcome=outcome))
 
     def info(self, message: str) -> None:
-        self.handle(JobInfoEvent(self._context.id, self._scopes.scope, message=message))
+        self.handle(JobInfoEvent(self._context.id, self._context.scope, message=message))
 
     def detail(self, message: str) -> None:
-        self.handle(JobDetailEvent(self._context.id, self._scopes.scope, message=message))
+        self.handle(JobDetailEvent(self._context.id, self._context.scope, message=message))
 
     def warning(self, warning: str | Exception) -> None:
-        self.handle(JobWarningEvent(self._context.id, self._scopes.scope, warning=warning))
+        self.handle(JobWarningEvent(self._context.id, self._context.scope, warning=warning))
 
     def error(self, error: str | Exception) -> None:
-        self.handle(JobErrorEvent(self._context.id, self._scopes.scope, error=error))
+        self.handle(JobErrorEvent(self._context.id, self._context.scope, error=error))
 
     def output(self, output: str | Iterable[str], label: str | None = None) -> None:
-        self.handle(JobOutputEvent(self._context.id, self._scopes.scope, output=output, label=label))
+        self.handle(JobOutputEvent(self._context.id, self._context.scope, output=output, label=label))
 
 
 class JobDirectEventDispatcher(JobEventDispatcher):

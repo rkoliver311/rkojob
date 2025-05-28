@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from rkojob import JobContext, JobException, ValueRef
+from rkojob import JobContext, JobException, ValueRef, create_scope_id
 from rkojob.actions import ShellAction, ToolActionBuilder, VerifyTestStructure
 from rkojob.factories import JobContextFactory
 from rkojob.util import ShellException, ShellResult
@@ -96,6 +96,13 @@ class TestToolActionBuilder(TestCase):
         )
 
 
+class StubScope:
+    def __init__(self, name, type, id=None):
+        self.name = name
+        self.type = type
+        self.id = id or create_scope_id()
+
+
 class TestVerifyTestStructure(TestCase):
     def test(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -117,8 +124,8 @@ class TestVerifyTestStructure(TestCase):
 
             sut = VerifyTestStructure(src_path=src_path, tests_path=tests_path)
             context = JobContextFactory.create()
-            mock_scope = MagicMock()
-            with context.in_scope(mock_scope), context.events.scope(mock_scope):
+            stub_scope = StubScope("scope", "type")
+            with context.events.scope(stub_scope):
                 with self.assertRaises(JobException) as e:
                     sut.action(context)
             self.assertEqual(
