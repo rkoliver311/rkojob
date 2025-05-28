@@ -2,7 +2,7 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
+from threading import RLock
 from typing import Iterable, cast
 
 from rkojob import (
@@ -15,6 +15,28 @@ from rkojob import (
     JobStatus,
     delegate,
 )
+
+
+class JobForkContextEvent(JobEvent):
+    type = "fork_context"
+
+    def __init__(self, context: JobContext, scope: JobScopeID | None, forked_context: JobContext) -> None:
+        super().__init__(context, scope, forked_context=forked_context)
+
+    @property
+    def forked_context(self) -> JobContext:
+        return cast(JobContext, self.data["forked_context"])
+
+
+class JobJoinContextEvent(JobEvent):
+    type = "join_context"
+
+    def __init__(self, context: JobContext, scope: JobScopeID | None, joined_context: JobContext) -> None:
+        super().__init__(context, scope, joined_context=joined_context)
+
+    @property
+    def joined_context(self) -> JobContext:
+        return cast(JobContext, self.data["joined_context"])
 
 
 class JobStartScopeEvent(JobEvent):
@@ -173,6 +195,12 @@ class JobStatusImpl(JobStatus):
     def handle(self, event: JobEvent) -> None:
         self._handler.handle(event)
 
+    def fork_context(self, context: JobContext) -> None:
+        self.handle(JobForkContextEvent(self._context, self._context.get_scope(), forked_context=context))
+
+    def join_context(self, context: JobContext) -> None:
+        self.handle(JobJoinContextEvent(self._context, self._context.get_scope(), joined_context=context))
+
     def start_scope(self, scope: JobScopeID) -> None:
         self.handle(JobStartScopeEvent(self._context, self._context.get_scope(), started_scope=scope))
 
@@ -233,3 +261,43 @@ class JobDirectEventDispatcher(JobEventDispatcher):
             if len(errors) == 1:
                 raise errors[0]
             raise JobException(f"Handle event failed: {errors}")
+
+
+class JobBufferedEventHandler(JobEventHandler):
+    def __init__(self, handler: JobEventHandler, size: int = -1) -> None:
+        self._handler: JobEventHandler = handler
+        self._size: int = size
+        self._events: list[JobEvent] = []
+        self._lock: RLock = RLock()
+
+    def handle(self, event: JobEvent) -> None:
+        with self._lock:
+            self._events.append(event)
+            if 0 <= self._size < len(self._events):
+                self.flush()
+
+    def flush(self) -> None:
+        with self._lock:
+            for event in self._events:
+                self._handler.handle(event)
+            self._events.clear()
+
+
+class JobLocalEventDispatcher(JobEventDispatcher):
+    def __init__(self, flush_to: JobEventHandler) -> None:
+        super().__init__()
+        self._buffer: JobBufferedEventHandler = JobBufferedEventHandler(flush_to)
+        self._events: JobEventDispatcher = JobDirectEventDispatcher()
+        self._events.add_handler(self._buffer)
+
+    def handle(self, event: JobEvent):
+        self._events.handle(event)
+
+    def add_handler(self, handler: JobEventHandler) -> None:
+        self._events.add_handler(handler)
+
+    def remove_handler(self, handler: JobEventHandler) -> None:
+        self._events.remove_handler(handler)
+
+    def flush(self) -> None:
+        self._buffer.flush()

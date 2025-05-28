@@ -17,7 +17,9 @@ from rkojob.events import (
     JobFinishItemEvent,
     JobFinishScopeEvent,
     JobFinishSectionEvent,
+    JobForkContextEvent,
     JobInfoEvent,
+    JobJoinContextEvent,
     JobOutputEvent,
     JobSkipScopeEvent,
     JobStartItemEvent,
@@ -29,6 +31,7 @@ from rkojob.events import (
 
 # TODO: Replace with subclasses?
 class JobStatusWriterPair(Enum):
+    CONTEXT = auto()
     SCOPE = auto()
     SECTION = auto()
     ITEM = auto()
@@ -95,6 +98,21 @@ class JobWriterEntry(ABC, Generic[T]):
         if seconds == 0 and millis == 0:
             return "0s"
         return f"{seconds}.{millis:03d}s"
+
+
+class ForkContextEntry(JobWriterEntry[JobForkContextEvent]):
+    pair_type = JobStatusWriterPair.CONTEXT
+    is_start = True
+
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"*Forking context {self.event.context} -> {self.event.forked_context}*")
+
+
+class JoinContextEntry(JobWriterEntry[JobJoinContextEvent]):
+    pair_type = JobStatusWriterPair.CONTEXT
+
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"*Joining context {self.event.joined_context} -> {self.event.context}*")
 
 
 class ScopeStartEntry(JobWriterEntry[JobStartScopeEvent]):
@@ -333,7 +351,11 @@ class JobStatusWriter(JobEventHandler):
         errors: list[str | Exception]
         append_only: bool = False
 
-        if isinstance(event, JobStartScopeEvent):
+        if isinstance(event, JobForkContextEvent):
+            entry = ForkContextEntry(event)
+        elif isinstance(event, JobJoinContextEvent):
+            entry = JoinContextEntry(event)
+        elif isinstance(event, JobStartScopeEvent):
             entry = ScopeStartEntry(event)
         elif isinstance(event, JobFinishScopeEvent):
             errors = self._get_errors(ScopeFinishEntry)
