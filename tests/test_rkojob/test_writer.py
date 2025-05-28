@@ -9,21 +9,35 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import JobException
+from rkojob.events import (
+    JobDetailEvent,
+    JobErrorEvent,
+    JobFinishItemEvent,
+    JobFinishScopeEvent,
+    JobFinishSectionEvent,
+    JobInfoEvent,
+    JobOutputEvent,
+    JobSkipScopeEvent,
+    JobStartItemEvent,
+    JobStartScopeEvent,
+    JobStartSectionEvent,
+    JobWarningEvent,
+)
 from rkojob.writer import (
-    ErrorEvent,
-    ItemFinishErrorEvent,
-    ItemFinishErrorsEvent,
-    ItemFinishEvent,
+    ErrorEntry,
+    ItemFinishEntry,
+    ItemFinishErrorEntry,
+    ItemFinishErrorsEntry,
     JobStatusWriter,
-    JobStatusWriterEvent,
-    OutputEvent,
-    ScopeFinishErrorEvent,
-    ScopeFinishErrorsEvent,
-    ScopeFinishEvent,
-    ScopeStartEvent,
-    SectionFinishErrorEvent,
-    SectionFinishErrorsEvent,
-    SectionFinishEvent,
+    JobWriterEntry,
+    OutputEntry,
+    ScopeFinishEntry,
+    ScopeFinishErrorEntry,
+    ScopeFinishErrorsEntry,
+    ScopeStartEntry,
+    SectionFinishEntry,
+    SectionFinishErrorEntry,
+    SectionFinishErrorsEntry,
 )
 
 
@@ -33,11 +47,17 @@ class StubScope:
         self.type = type
         self.id = id or name
 
+    def __str__(self):
+        return f"{self.type} {self.name}"
 
-class TestOutputEvent(TestCase):
+
+class TestOutputEntry(TestCase):
     def test_collapsible(self) -> None:
         stream: StringIO = StringIO()
-        sut = OutputEvent("this\nis\noutput\n", label="label", collapsible=True)
+        sut = OutputEntry(
+            JobOutputEvent(MagicMock(), StubScope("scope", "type"), "this\nis\noutput\n", label="label"),
+            collapsible=True,
+        )
         sut.write_event(stream)
         self.assertEqual(
             "<details>\n"
@@ -54,7 +74,10 @@ class TestOutputEvent(TestCase):
 
     def test_not_collapsible(self) -> None:
         stream: StringIO = StringIO()
-        sut = OutputEvent("this\nis\noutput\n", label="label", collapsible=False)
+        sut = OutputEntry(
+            JobOutputEvent(MagicMock(), StubScope("scope", "type"), "this\nis\noutput\n", label="label"),
+            collapsible=False,
+        )
         sut.write_event(stream)
         self.assertEqual(
             "label:\n" "\n" "    this\n" "    is\n" "    output\n" "\n",
@@ -65,241 +88,262 @@ class TestOutputEvent(TestCase):
 class TestJobStatusWriter(TestCase):
     def test_depth(self) -> None:
         sut: JobStatusWriter = JobStatusWriter(MagicMock())
-        self.assertEqual(0, sut._depth(ScopeFinishEvent))
-        self.assertEqual(0, sut._depth(SectionFinishEvent))
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        self.assertEqual(0, sut._depth(ScopeFinishEntry))
+        self.assertEqual(0, sut._depth(SectionFinishEntry))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.start_scope(MagicMock())
-        self.assertEqual(1, sut._depth(ScopeFinishEvent))
-        self.assertEqual(0, sut._depth(SectionFinishEvent))
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        mock_scope_1 = MagicMock()
+        sut.handle(JobStartScopeEvent(MagicMock(), None, started_scope=mock_scope_1))
+        self.assertEqual(1, sut._depth(ScopeFinishEntry))
+        self.assertEqual(0, sut._depth(SectionFinishEntry))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.start_scope(MagicMock())
-        self.assertEqual(2, sut._depth(ScopeStartEvent))
-        self.assertEqual(0, sut._depth(SectionFinishEvent))
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartScopeEvent(MagicMock(), mock_scope_1, started_scope=MagicMock()))
+        self.assertEqual(2, sut._depth(ScopeStartEntry))
+        self.assertEqual(0, sut._depth(SectionFinishEntry))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.start_section(MagicMock())
-        self.assertEqual(2, sut._depth(ScopeStartEvent))
-        self.assertEqual(1, sut._depth(SectionFinishEvent))
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartSectionEvent(MagicMock(), MagicMock(), "section"))
+        self.assertEqual(2, sut._depth(ScopeStartEntry))
+        self.assertEqual(1, sut._depth(SectionFinishEntry))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.start_section(MagicMock())
-        self.assertEqual(2, sut._depth(ScopeStartEvent))
-        self.assertEqual(2, sut._depth(SectionFinishEvent))
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartSectionEvent(MagicMock(), MagicMock(), "section"))
+        self.assertEqual(2, sut._depth(ScopeStartEntry))
+        self.assertEqual(2, sut._depth(SectionFinishEntry))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.start_item(MagicMock())
-        self.assertEqual(2, sut._depth(ScopeStartEvent))
-        self.assertEqual(2, sut._depth(SectionFinishEvent))
-        self.assertEqual(1, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartItemEvent(MagicMock(), MagicMock(), "item"))
+        self.assertEqual(2, sut._depth(ScopeStartEntry))
+        self.assertEqual(2, sut._depth(SectionFinishEntry))
+        self.assertEqual(1, sut._depth(ItemFinishEntry))
 
-        sut.start_item(MagicMock())
-        self.assertEqual(2, sut._depth(ScopeStartEvent))
-        self.assertEqual(2, sut._depth(SectionFinishEvent))
-        self.assertEqual(2, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartItemEvent(MagicMock(), MagicMock(), "item"))
+        self.assertEqual(2, sut._depth(ScopeStartEntry))
+        self.assertEqual(2, sut._depth(SectionFinishEntry))
+        self.assertEqual(2, sut._depth(ItemFinishEntry))
 
-        sut.finish_item()
-        self.assertEqual(1, sut._depth(ItemFinishEvent))
+        sut.handle(JobFinishItemEvent(MagicMock(), MagicMock(), "outcome"))
+        self.assertEqual(1, sut._depth(ItemFinishEntry))
 
-        sut.start_item(MagicMock())
-        self.assertEqual(2, sut._depth(ItemFinishEvent))
+        sut.handle(JobStartItemEvent(MagicMock(), MagicMock(), "item"))
+        self.assertEqual(2, sut._depth(ItemFinishEntry))
 
-        sut.finish_item()
-        self.assertEqual(1, sut._depth(ItemFinishEvent))
+        sut.handle(JobFinishItemEvent(MagicMock(), MagicMock(), "outcome"))
+        self.assertEqual(1, sut._depth(ItemFinishEntry))
 
-        sut.finish_item()
-        self.assertEqual(0, sut._depth(ItemFinishEvent))
+        sut.handle(JobFinishItemEvent(MagicMock(), MagicMock(), "outcome"))
+        self.assertEqual(0, sut._depth(ItemFinishEntry))
 
-        sut.finish_section()
-        self.assertEqual(1, sut._depth(SectionFinishEvent))
+        sut.handle(JobFinishSectionEvent(MagicMock(), MagicMock(), "section"))
+        self.assertEqual(1, sut._depth(SectionFinishEntry))
 
-        sut.finish_section()
-        self.assertEqual(0, sut._depth(SectionFinishEvent))
+        sut.handle(JobFinishSectionEvent(MagicMock(), MagicMock(), "section"))
+        self.assertEqual(0, sut._depth(SectionFinishEntry))
 
-        sut.finish_scope()
-        self.assertEqual(1, sut._depth(ScopeFinishEvent))
+        sut.handle(JobFinishScopeEvent(MagicMock(), None, MagicMock()))
+        self.assertEqual(1, sut._depth(ScopeFinishEntry))
 
-        sut.finish_scope()
-        self.assertEqual(0, sut._depth(ScopeFinishEvent))
+        sut.handle(JobFinishScopeEvent(MagicMock(), None, MagicMock()))
+        self.assertEqual(0, sut._depth(ScopeFinishEntry))
 
     def test_find_start_event(self) -> None:
-        sut: JobStatusWriter = JobStatusWriter(MagicMock())
+        sut: JobStatusWriter = JobStatusWriter(MagicMock(), MagicMock())
+        mock_context = MagicMock()
         mock_scope_1 = MagicMock()
-        sut.start_scope(mock_scope_1)
-        event = sut._find_start_event(ScopeFinishEvent)
-        self.assertEqual(event.event, mock_scope_1)
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=mock_scope_1))
+        entry = sut._find_start_entry(ScopeFinishEntry)
+        self.assertIs(mock_context, entry.event.context)
+        self.assertIsNone(entry.event.scope)
+        self.assertIs(mock_scope_1, entry.event.started_scope)
 
         mock_scope_2 = MagicMock()
-        sut.start_scope(mock_scope_2)
-        event = sut._find_start_event(ScopeFinishEvent)
-        self.assertEqual(event.event, mock_scope_2)
+        sut.handle(JobStartScopeEvent(mock_context, mock_scope_1, started_scope=mock_scope_2))
+        entry = sut._find_start_entry(ScopeFinishEntry)
+        self.assertIs(mock_context, entry.event.context)
+        self.assertIs(mock_scope_1, entry.event.scope)
+        self.assertIs(mock_scope_2, entry.event.started_scope)
 
-        sut.start_item("item")
+        sut.handle(JobStartItemEvent(mock_context, mock_scope_2, "item"))
 
-        event = sut._find_start_event(ScopeFinishErrorEvent)
-        self.assertEqual(event.event, mock_scope_2)
+        entry = sut._find_start_entry(ScopeFinishErrorEntry)
+        self.assertIs(mock_context, entry.event.context)
+        self.assertIs(mock_scope_1, entry.event.scope)
+        self.assertIs(mock_scope_2, entry.event.started_scope)
 
-        event = sut._find_start_event(ItemFinishErrorsEvent)
-        self.assertEqual("item", event.event)
-        sut.finish_item()
+        entry = sut._find_start_entry(ItemFinishErrorsEntry)
+        self.assertEqual("item", entry.event.item)
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope_2, "done."))
         with self.assertRaises(JobException):
-            _ = sut._find_start_event(ItemFinishErrorEvent)
+            _ = sut._find_start_entry(ItemFinishErrorEntry)
 
-        sut.start_section("name")
-        event = sut._find_start_event(SectionFinishErrorEvent)
-        self.assertEqual("name", event.event)
+        sut.handle(JobStartSectionEvent(mock_context, mock_scope_2, "name"))
+        entry = sut._find_start_entry(SectionFinishErrorEntry)
+        self.assertEqual("name", entry.event.section)
 
-        sut.finish_section()
+        sut.handle(JobFinishSectionEvent(mock_context, mock_scope_2, "name"))
         with self.assertRaises(JobException):
-            _ = sut._find_start_event(SectionFinishErrorsEvent)
+            _ = sut._find_start_entry(SectionFinishErrorsEntry)
 
-        sut.finish_scope()
-        event = sut._find_start_event(ScopeFinishEvent)
-        self.assertEqual(event.event, mock_scope_1)
+        sut.handle(JobFinishScopeEvent(mock_context, mock_scope_1, finished_scope=mock_scope_2))
+        entry = sut._find_start_entry(ScopeFinishEntry)
+        self.assertIsNone(entry.event.scope)
+        self.assertIs(mock_scope_1, entry.event.started_scope)
 
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=mock_scope_1))
         with self.assertRaises(JobException):
-            _ = sut._find_start_event(ScopeFinishErrorsEvent)
+            _ = sut._find_start_entry(ScopeFinishErrorsEntry)
 
     def test_find_start_event_negative(self) -> None:
         sut = JobStatusWriter(MagicMock())
         with self.assertRaises(JobException) as e:
-            _ = sut._find_start_event(ErrorEvent)
+            _ = sut._find_start_entry(ErrorEntry)
         self.assertEqual("Event type does not have start/finish pairs.", str(e.exception))
 
         with self.assertRaises(JobException) as e:
-            _ = sut._find_start_event(ScopeFinishEvent)
+            _ = sut._find_start_entry(ScopeFinishEntry)
         self.assertEqual("Did not find start event.", str(e.exception))
 
         with self.assertRaises(JobException) as e:
-            _ = sut._find_start_event(ScopeStartEvent)
+            _ = sut._find_start_entry(ScopeStartEntry)
         self.assertEqual("Event type is a start event.", str(e.exception))
 
     def test(self) -> None:
         expected: list[str] = []
+        mock_context = MagicMock()
 
         stream: StringIO = StringIO()
-        sut: JobStatusWriter = JobStatusWriter(stream=stream)
+        sut: JobStatusWriter = JobStatusWriter(stream=stream, include_duration=False)
 
         expected.append("# Job Job\n\n")
-        sut.start_scope(StubScope("Job", "Job"), include_duration=False)
+        job = StubScope("Job", "Job")
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=job))
 
         expected.append("## Stage Stage1\n\n")
-        sut.start_scope(StubScope("Stage1", "Stage"), include_duration=False)
+        stage1 = StubScope("Stage1", "Stage")
+        sut.handle(JobStartScopeEvent(mock_context, job, started_scope=stage1))
 
         expected.append("### Step Step1.1\n\n")
-        sut.start_scope(StubScope("Step1.1", "Step"), include_duration=False)
+        step1_1 = StubScope("Step1.1", "Step")
+        sut.handle(JobStartScopeEvent(mock_context, stage1, started_scope=step1_1))
 
         expected.append(" - Step1.1.1...done.\n\n")
-        sut.start_item("Step1.1.1")
-        sut.finish_item("done.")
+        sut.handle(JobStartItemEvent(mock_context, step1_1, "Step1.1.1"))
+        sut.handle(JobFinishItemEvent(mock_context, step1_1, "done."))
 
         expected.append("#### Section\n\n")
-        sut.start_section("Section", include_duration=False)
+        sut.handle(JobStartSectionEvent(mock_context, stage1, "Section"))
 
         expected.append(" - Step1.1.2...done.\n\n")
-        sut.start_item("Step1.1.2")
-        sut.finish_item("done.")
+        sut.handle(JobStartItemEvent(mock_context, step1_1, "Step1.1.2"))
+        sut.handle(JobFinishItemEvent(mock_context, step1_1, "done."))
 
         expected.append("Finished **Section**\n\n")
-        sut.finish_section()
+        sut.handle(JobFinishSectionEvent(mock_context, step1_1, "Section"))
 
         expected.append("✅ Finished **Step Step1.1**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, stage1, finished_scope=step1_1))
 
         expected.append("### Step Step1.2\n\n")
-        sut.start_scope(StubScope("Step1.2", "Step"), include_duration=False)
+        step1_2 = StubScope("Step1.2", "Step")
+        sut.handle(JobStartScopeEvent(mock_context, stage1, started_scope=step1_2))
 
         expected.append("✅ Finished **Step Step1.2**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, stage1, finished_scope=step1_2))
 
         expected.append("✅ Finished **Stage Stage1**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, job, finished_scope=stage1))
 
         expected.append("## Stage Stage2\n\n")
-        sut.start_scope(StubScope("Stage2", "Stage"), include_duration=False)
+        stage2 = StubScope("Stage2", "Stage")
+        sut.handle(JobStartScopeEvent(mock_context, job, started_scope=stage2))
 
         expected.append("### Step Step2.1\n\n")
-        sut.start_scope(StubScope("Step2.1", "Step"), include_duration=False)
+        step2_1 = StubScope("Step2.1", "Step")
+        sut.handle(JobStartScopeEvent(mock_context, stage2, started_scope=step2_1))
 
         expected.append("✅ Finished **Step Step2.1**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, stage2, finished_scope=step2_1))
 
         expected.append("### Step Step2.2\n\n")
-        sut.start_scope(StubScope("Step2.2", "Step"), include_duration=False)
+        step2_2 = StubScope("Step2.2", "Step")
+        sut.handle(JobStartScopeEvent(mock_context, stage2, started_scope=step2_2))
 
         expected.append(" - Step2.2.1...\n")
-        sut.start_item("Step2.2.1")
+        sut.handle(JobStartItemEvent(mock_context, step2_2, "Step2.2.1"))
 
         expected.append("   - Step2.2.2...done.\n")
-        sut.start_item("Step2.2.2")
-        sut.finish_item("done.")
+        sut.handle(JobStartItemEvent(mock_context, step2_2, "Step2.2.2"))
+        sut.handle(JobFinishItemEvent(mock_context, step2_2, "done."))
 
         expected.append("   - Step2.2.3...done.\n")
-        sut.start_item("Step2.2.3")
-        sut.finish_item("done.")
+        sut.handle(JobStartItemEvent(mock_context, step2_2, "Step2.2.3"))
+        sut.handle(JobFinishItemEvent(mock_context, step2_2, "done."))
 
         expected.append("   done.\n\n")
-        sut.finish_item()
+        sut.handle(JobFinishItemEvent(mock_context, step2_2, "done."))
 
         expected.append("✅ Finished **Step Step2.2**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, stage2, finished_scope=step2_2))
 
         expected.append("✅ Finished **Stage Stage2**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, job, finished_scope=stage2))
 
         expected.append("✅ Finished **Job Job**\n\n")
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=job))
 
         self.assertEqual("".join(expected), stream.getvalue())
 
     def test_get_errors(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+        self.assertEqual([], sut._get_errors(ErrorEntry))
 
-        self.assertEqual([], sut._get_errors(ErrorEvent))
-
-        sut.start_scope(StubScope("name", "type"))
-        sut.error("error1")
-        sut.start_section("section")
-        sut.error("error2")
-        sut.start_item("item")
-        sut.error("error3")
-        self.assertEqual(["error3"], sut._get_errors(ItemFinishEvent))
-        self.assertEqual(["error3"], sut._get_errors(ItemFinishEvent, include_children=False))
-        sut.finish_item()
-        self.assertEqual(["error2", "error3"], sut._get_errors(SectionFinishEvent))
-        self.assertEqual(["error2"], sut._get_errors(SectionFinishEvent, include_children=False))
-        sut.finish_section()
-        self.assertEqual(["error1", "error2", "error3"], sut._get_errors(ScopeFinishEvent))
-        self.assertEqual(["error1"], sut._get_errors(ScopeFinishEvent, include_children=False))
-        sut.finish_scope()
+        scope = StubScope("name", "type")
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=scope))
+        sut.handle(JobErrorEvent(mock_context, scope, "error1"))
+        sut.handle(JobStartSectionEvent(mock_context, scope, "section"))
+        sut.handle(JobErrorEvent(mock_context, scope, "error2"))
+        sut.handle(JobStartItemEvent(mock_context, scope, "item"))
+        sut.handle(JobErrorEvent(mock_context, scope, "error3"))
+        self.assertEqual(["error3"], sut._get_errors(ItemFinishEntry))
+        self.assertEqual(["error3"], sut._get_errors(ItemFinishEntry, include_children=False))
+        sut.handle(JobFinishItemEvent(mock_context, scope, "done."))
+        self.assertEqual(["error2", "error3"], sut._get_errors(SectionFinishEntry))
+        self.assertEqual(["error2"], sut._get_errors(SectionFinishEntry, include_children=False))
+        sut.handle(JobFinishSectionEvent(mock_context, scope, "section"))
+        self.assertEqual(["error1", "error2", "error3"], sut._get_errors(ScopeFinishEntry))
+        self.assertEqual(["error1"], sut._get_errors(ScopeFinishEntry, include_children=False))
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=scope))
 
     def test_start_finish_scope(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
 
-        sut.start_scope(StubScope("name", "type"))
+        scope = StubScope("name", "type")
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=scope))
 
         self.assertEqual("# type name\n\n", stream.getvalue())
 
-        sut.start_scope(StubScope("name2", "type2"), include_duration=False)
+        scope2 = StubScope("name2", "type2")
+        sut.handle(JobStartScopeEvent(mock_context, scope, started_scope=scope2))
         self.assertEqual("# type name\n\n## type2 name2\n\n", stream.getvalue())
 
-        sut.finish_scope()
+        sut.handle(JobFinishScopeEvent(mock_context, scope, finished_scope=scope2))
         self.assertEqual("# type name\n\n## type2 name2\n\n✅ Finished **type2 name2**\n\n", stream.getvalue())
 
-        sut.error("error1")
-        sut.error("error2")
-        sut.finish_scope()
+        sut.handle(JobErrorEvent(mock_context, scope, "error1"))
+        sut.handle(JobErrorEvent(mock_context, scope, "error2"))
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=scope))
         self.assertEqual(
             "# type name\n\n"
             "## type2 name2\n\n"
             "✅ Finished **type2 name2**\n\n"
             "❌ error1\n\n"
             "❌ error2\n\n"
-            "❌ Finished **type name** (0s)\n"
+            "❌ Finished **type name**\n"
             " - ❌ error1\n"
             " - ❌ error2\n\n",
             stream.getvalue(),
@@ -308,87 +352,101 @@ class TestJobStatusWriter(TestCase):
     def test_skip_scope(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.skip_scope(StubScope("name", "type"), "Disabled")
+        sut.handle(
+            JobSkipScopeEvent(MagicMock(), MagicMock(), skipped_scope=StubScope("name", "type"), reason="Disabled")
+        )
         self.assertEqual("**Skipping type name (Disabled)**\n\n", stream.getvalue())
 
     def test_start_finish_section(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
 
-        sut.start_section("name")
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+
+        sut.handle(JobStartSectionEvent(mock_context, mock_scope, "name"))
         self.assertEqual("# name\n\n", stream.getvalue())
 
-        sut.start_section("name2", include_duration=False)
+        sut.handle(JobStartSectionEvent(mock_context, mock_scope, "name2"))
         self.assertEqual("# name\n\n## name2\n\n", stream.getvalue())
 
-        sut.finish_section("name2")
+        sut.handle(JobFinishSectionEvent(mock_context, mock_scope, "name2"))
         self.assertEqual("# name\n\n## name2\n\nFinished **name2**\n\n", stream.getvalue())
 
-        sut.error("error")
-        sut.finish_section("name")
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error"))
+        sut.handle(JobFinishSectionEvent(mock_context, mock_scope, "name"))
         self.assertEqual(
-            "# name\n\n## name2\n\nFinished **name2**\n\n❌ error\n\n\u274c Finished **name** (0s)\n❌ error\n\n",
+            "# name\n\n## name2\n\nFinished **name2**\n\n❌ error\n\n\u274c Finished **name**\n❌ error\n\n",
             stream.getvalue(),
         )
 
     def test_start_finish_item(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.start_item("foo")
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...", stream.getvalue())
 
-        sut.finish_item("done.")
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "done."))
         self.assertEqual(" - foo...done.\n", stream.getvalue())
 
     def test_start_finish_item_include_duration(self) -> None:
         stream: StringIO = StringIO()
-        sut = JobStatusWriter(stream=stream)
-        sut.start_item("foo", include_duration=True)
+        sut = JobStatusWriter(stream=stream, include_duration=True)
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...", stream.getvalue())
 
-        sut.finish_item("done.")
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "done."))
         self.assertEqual(" - foo...done. (0s)\n", stream.getvalue())
 
     def test_start_finish_item_error(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
 
-        sut.start_item("foo")
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...", stream.getvalue())
 
-        sut.error("error")
-        sut.finish_item("foo")
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error"))
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...❌ error\n", stream.getvalue())
 
     def test_start_finish_item_error_multiple(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
 
-        sut.start_item("foo")
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...", stream.getvalue())
 
-        sut.error("error1")
-        sut.error("error2")
-        sut.error(Exception("error3"))
-        sut.finish_item("foo")
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error1"))
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error2"))
+        sut.handle(JobErrorEvent(mock_context, mock_scope, Exception("error3")))
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "foo"))
 
         self.assertEqual(" - foo...❌\n   - ❌ error1\n" "   - ❌ error2\n" "   - ❌ error3\n", stream.getvalue())
 
     def test_start_finish_inner_item_error_multiple(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-
-        sut.start_item("foo")
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "foo"))
         self.assertEqual(" - foo...", stream.getvalue())
 
-        sut.start_item("bar")
+        sut.handle(JobStartItemEvent(mock_context, mock_scope, "bar"))
         self.assertEqual(" - foo...\n" "   - bar...", stream.getvalue())
 
-        sut.error("error1")
-        sut.error("error2")
-        sut.error(Exception("error3"))
-        sut.finish_item("bar")
-        sut.finish_item("foo")
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error1"))
+        sut.handle(JobErrorEvent(mock_context, mock_scope, "error2"))
+        sut.handle(JobErrorEvent(mock_context, mock_scope, Exception("error3")))
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "bar"))
+        sut.handle(JobFinishItemEvent(mock_context, mock_scope, "foo"))
 
         self.assertEqual(
             " - foo...\n" "   - bar...❌\n" "     - ❌ error1\n" "     - ❌ error2\n" "     - ❌ error3\n   foo\n",
@@ -396,54 +454,63 @@ class TestJobStatusWriter(TestCase):
         )
 
     def test_duration_format(self) -> None:
-        self.assertEqual("0s", JobStatusWriterEvent._format_duration(timedelta()))
-        self.assertEqual("1.000s", JobStatusWriterEvent._format_duration(timedelta(seconds=1)))
-        self.assertEqual("5s", JobStatusWriterEvent._format_duration(timedelta(seconds=5, milliseconds=1)))
-        self.assertEqual("0.001s", JobStatusWriterEvent._format_duration(timedelta(milliseconds=1)))
-        self.assertEqual("1.001s", JobStatusWriterEvent._format_duration(timedelta(seconds=1, milliseconds=1)))
-        self.assertEqual("4m1s", JobStatusWriterEvent._format_duration(timedelta(minutes=4, seconds=1, milliseconds=1)))
+        self.assertEqual("0s", JobWriterEntry._format_duration(timedelta()))
+        self.assertEqual("1.000s", JobWriterEntry._format_duration(timedelta(seconds=1)))
+        self.assertEqual("5s", JobWriterEntry._format_duration(timedelta(seconds=5, milliseconds=1)))
+        self.assertEqual("0.001s", JobWriterEntry._format_duration(timedelta(milliseconds=1)))
+        self.assertEqual("1.001s", JobWriterEntry._format_duration(timedelta(seconds=1, milliseconds=1)))
+        self.assertEqual("4m1s", JobWriterEntry._format_duration(timedelta(minutes=4, seconds=1, milliseconds=1)))
         self.assertEqual(
             "26h3m",
-            JobStatusWriterEvent._format_duration(timedelta(days=1, hours=2, minutes=3, seconds=4, milliseconds=5)),
+            JobWriterEntry._format_duration(timedelta(days=1, hours=2, minutes=3, seconds=4, milliseconds=5)),
         )
 
     def test_info(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.info("info")
+        sut.handle(JobInfoEvent(MagicMock(), MagicMock(), "info"))
         self.assertEqual("info\n\n", stream.getvalue())
 
     def test_detail(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.detail("detail")
+        sut.handle(JobDetailEvent(MagicMock(), MagicMock(), "detail"))
         self.assertEqual("🔎 detail\n\n", stream.getvalue())
 
     def test_detail_quiet(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream, show_detail=False)
-        sut.detail("detail")
+        sut.handle(JobDetailEvent(MagicMock(), MagicMock(), "detail"))
         self.assertEqual("", stream.getvalue())
 
     def test_warning(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.warning("warning")
+        sut.handle(JobWarningEvent(MagicMock(), MagicMock(), "warning"))
         self.assertEqual("⚠️ warning\n\n", stream.getvalue())
 
     def test_error(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.error("error")
+        sut.handle(JobErrorEvent(MagicMock(), MagicMock(), "error"))
         self.assertEqual("❌ error\n\n", stream.getvalue())
 
     def test_output(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.start_section("Some code")
-        sut.info("Here it is:")
-        sut.output(["some Code {\n", "  var foo = bar;\n  print(foo);\n", "};\n"], label="Some code")
-        sut.finish_section()
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        sut.handle(JobStartSectionEvent(mock_context, mock_scope, "Some code"))
+        sut.handle(JobInfoEvent(mock_context, mock_scope, "Here it is:"))
+        sut.handle(
+            JobOutputEvent(
+                mock_context,
+                mock_scope,
+                ["some Code {\n", "  var foo = bar;\n  print(foo);\n", "};\n"],
+                label="Some code",
+            )
+        )
+        sut.handle(JobFinishSectionEvent(mock_context, mock_scope, "Some code"))
         self.assertEqual(
             "# Some code\n\n"
             "Here it is:\n\n"
@@ -452,12 +519,12 @@ class TestJobStatusWriter(TestCase):
             "      var foo = bar;\n"
             "      print(foo);\n"
             "    };\n\n"
-            "Finished **Some code** (0s)\n\n",
+            "Finished **Some code**\n\n",
             stream.getvalue(),
         )
 
     def test_output_as_str(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)
-        sut.output("Some output")
+        sut.handle(JobOutputEvent(MagicMock(), MagicMock(), "Some output"))
         self.assertEqual("output:\n\n    Some output\n\n", stream.getvalue())

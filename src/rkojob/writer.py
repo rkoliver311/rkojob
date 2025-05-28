@@ -5,11 +5,26 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import Enum, auto
-from typing import ClassVar, Final, Generic, Iterable, TextIO, TypeVar
+from typing import ClassVar, Generic, Iterable, TextIO, TypeVar
 
-from rkojob import JobException, JobScope, JobStatus
+from rkojob import JobEvent, JobEventHandler, JobException
+from rkojob.events import (
+    JobDetailEvent,
+    JobErrorEvent,
+    JobFinishItemEvent,
+    JobFinishScopeEvent,
+    JobFinishSectionEvent,
+    JobInfoEvent,
+    JobOutputEvent,
+    JobSkipScopeEvent,
+    JobStartItemEvent,
+    JobStartScopeEvent,
+    JobStartSectionEvent,
+    JobWarningEvent,
+)
 
 
 # TODO: Replace with subclasses?
@@ -19,28 +34,23 @@ class JobStatusWriterPair(Enum):
     ITEM = auto()
 
 
-T = TypeVar("T")
+T = TypeVar("T", bound=JobEvent)
 
 
-class JobStatusWriterEvent(Generic[T]):
+class JobWriterEntry(ABC, Generic[T]):
     pair_type: ClassVar[JobStatusWriterPair | None] = None
     is_start: ClassVar[bool] = False
     prefix: ClassVar[str] = "\n\n"
     suffix: ClassVar[str] = "\n\n"
 
-    def __init__(
-        self,
-        event: T,
-        start: datetime | None = None,
-    ):
+    def __init__(self, event: T):
         self.event: T = event
-        self.start: datetime | None = start
 
     def write_event(
         self,
         stream: TextIO,
         depth: int = 0,
-        prev_event: JobStatusWriterEvent | None = None,
+        prev_event: JobWriterEntry | None = None,
         duration: timedelta | None = None,
     ) -> None:
         self._write_prefix(stream, prev_event=prev_event)
@@ -48,19 +58,18 @@ class JobStatusWriterEvent(Generic[T]):
         self._write_event(stream, depth, duration=None if self.is_start else duration)
         self._write_suffix(stream)
 
-    def _write_prefix(self, stream: TextIO, prev_event: JobStatusWriterEvent | None) -> None:
+    def _write_prefix(self, stream: TextIO, prev_event: JobWriterEntry | None) -> None:
         if not prev_event:
             return
         if not prev_event.suffix.endswith(self.prefix):
             separator: str = self.prefix.removeprefix(prev_event.suffix)
             stream.write(separator)
 
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         pass
 
-    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(str(self.event))
-        self._write_duration(stream, duration=duration)
+    @abstractmethod
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None: ...
 
     def _write_duration(self, stream: TextIO, duration: timedelta | None) -> None:
         if duration:
@@ -88,218 +97,211 @@ class JobStatusWriterEvent(Generic[T]):
         return f"{seconds}.{millis:03d}s"
 
 
-class ScopeStartEvent(JobStatusWriterEvent[JobScope]):
+class ScopeStartEntry(JobWriterEntry[JobStartScopeEvent]):
     pair_type = JobStatusWriterPair.SCOPE
     is_start = True
 
-    def __init__(self, scope: JobScope, start: datetime | None = None) -> None:
-        super().__init__(scope, start=start)
-
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("#" + "#" * depth + " ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"{self.event.type} {self.event.name}")
+        stream.write(str(self.event.started_scope))
 
 
-class ScopeFinishEvent(JobStatusWriterEvent[JobScope]):
+class ScopeFinishEntry(JobWriterEntry[JobFinishScopeEvent]):
     pair_type = JobStatusWriterPair.SCOPE
 
-    def __init__(self, scope: JobScope) -> None:
-        super().__init__(scope)
-
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("\u2705 ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"Finished **{self.event.type} {self.event.name}**")
+        stream.write(f"Finished **{self.event.finished_scope}**")
         self._write_duration(stream, duration)
 
 
-class ScopeFinishErrorEvent(JobStatusWriterEvent[JobScope]):
+class ScopeFinishErrorEntry(JobWriterEntry[JobFinishScopeEvent]):
     pair_type = JobStatusWriterPair.SCOPE
 
-    def __init__(self, scope: JobScope, error: str | Exception) -> None:
-        super().__init__(scope)
+    def __init__(self, event: JobFinishScopeEvent, error: str | Exception) -> None:
+        super().__init__(event)
         self.error: str | Exception = error
 
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("\u274c ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"Finished **{self.event.type} {self.event.name}**")
+        stream.write(f"Finished **{self.event.finished_scope}**")
         self._write_duration(stream, duration)
         stream.write(f"\n\u274c {self.error}")
 
 
-class ScopeFinishErrorsEvent(JobStatusWriterEvent[JobScope]):
+class ScopeFinishErrorsEntry(JobWriterEntry[JobFinishScopeEvent]):
     pair_type = JobStatusWriterPair.SCOPE
 
-    def __init__(self, scope: JobScope, errors: list[str | Exception]) -> None:
-        super().__init__(scope)
+    def __init__(self, event: JobFinishScopeEvent, errors: list[str | Exception]) -> None:
+        super().__init__(event)
         self.errors: list[str | Exception] = errors
 
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("\u274c ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"Finished **{self.event.type} {self.event.name}**")
+        stream.write(f"Finished **{self.event.finished_scope}**")
         self._write_duration(stream, duration)
         for error in self.errors:
             stream.write(f"\n - \u274c {error}")
 
 
-class ScopeSkippedEvent(JobStatusWriterEvent[JobScope]):
-    def __init__(self, scope: JobScope, reason: str | None = None) -> None:
-        super().__init__(scope)
-        self.reason: str | None = reason
-
+class ScopeSkippedEntry(JobWriterEntry[JobSkipScopeEvent]):
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"**Skipping {self.event.type} {self.event.name}")
-        if self.reason:
-            stream.write(f" ({self.reason})")
+        stream.write(f"**Skipping {self.event.skipped_scope}")
+        if self.event.reason:
+            stream.write(f" ({self.event.reason})")
         stream.write("**")
 
 
-class SectionStartEvent(JobStatusWriterEvent[str]):
+class SectionStartEntry(JobWriterEntry[JobStartSectionEvent]):
     pair_type = JobStatusWriterPair.SECTION
     is_start = True
 
-    def __init__(self, name: str, start: datetime | None = None) -> None:
-        super().__init__(name, start=start)
-
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("#" + "#" * depth + " ")
 
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(self.event.section)
 
-class SectionFinishEvent(JobStatusWriterEvent[str]):
+
+class SectionFinishEntry(JobWriterEntry[JobFinishSectionEvent]):
     pair_type = JobStatusWriterPair.SECTION
 
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
-
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"Finished **{self.event}**")
+        stream.write(f"Finished **{self.event.section}**")
         self._write_duration(stream, duration)
 
 
-class SectionFinishErrorEvent(JobStatusWriterEvent[str]):
+class SectionFinishErrorEntry(JobWriterEntry[JobFinishSectionEvent]):
     pair_type = JobStatusWriterPair.SECTION
 
-    def __init__(self, name: str, error: str | Exception) -> None:
-        super().__init__(name)
+    def __init__(self, event: JobFinishSectionEvent, error: str | Exception) -> None:
+        super().__init__(event)
         self.error: str | Exception = error
 
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("\u274c ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"Finished **{self.event}**")
+        stream.write(f"Finished **{self.event.section}**")
         self._write_duration(stream, duration)
         stream.write(f"\n\u274c {self.error}")
 
 
-class SectionFinishErrorsEvent(JobStatusWriterEvent[str]):
+class SectionFinishErrorsEntry(JobWriterEntry[JobFinishSectionEvent]):
     pair_type = JobStatusWriterPair.SECTION
 
-    def __init__(self, name: str, errors: list[str | Exception]) -> None:
-        super().__init__(name)
+    def __init__(self, event: JobFinishSectionEvent, errors: list[str | Exception]) -> None:
+        super().__init__(event)
         self.errors: list[str | Exception] = errors
 
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("\u274c ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"\u274c Finished **{self.event}**")
+        stream.write(f"\u274c Finished **{self.event.section}**")
         self._write_duration(stream, duration)
         for error in self.errors:
             stream.write(f"\n\u274c {error}")
 
 
-class ItemStartEvent(JobStatusWriterEvent[str]):
+class ItemStartEntry(JobWriterEntry[JobStartItemEvent]):
     pair_type = JobStatusWriterPair.ITEM
     is_start = True
     prefix = "\n"
     suffix = ""
 
-    def __init__(self, event: str, start: datetime | None = None) -> None:
-        super().__init__(event, start=start)
-
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
         stream.write("  " * depth + " - ")
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"{self.event}...")
+        stream.write(f"{self.event.item}...")
 
 
-class ItemFinishEvent(JobStatusWriterEvent[str]):
+class ItemFinishEntry(JobWriterEntry[JobFinishItemEvent]):
     pair_type = JobStatusWriterPair.ITEM
     prefix = ""
     suffix = "\n"
 
-    def __init__(self, outcome: str = "done.") -> None:
-        super().__init__(outcome)
-
-    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobStatusWriterEvent | None = None) -> None:
-        if not isinstance(prev_event, ItemStartEvent):
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
+        if not isinstance(prev_event, ItemStartEntry):
             stream.write("   " * depth)
 
-
-class ItemFinishErrorEvent(JobStatusWriterEvent[str | Exception]):
-    pair_type = JobStatusWriterPair.ITEM
-    prefix = ""
-    suffix = "\n"
-
-    def __init__(self, error: str | Exception) -> None:
-        super().__init__(error)
-
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"\u274c {self.event}")
+        stream.write(self.event.outcome)
         self._write_duration(stream, duration)
 
 
-class ItemFinishErrorsEvent(JobStatusWriterEvent[list[str | Exception]]):
+class ItemFinishErrorEntry(JobWriterEntry[JobFinishItemEvent]):
     pair_type = JobStatusWriterPair.ITEM
     prefix = ""
     suffix = "\n"
 
-    def __init__(self, errors: list[str | Exception]) -> None:
-        super().__init__(errors)
+    def __init__(self, event: JobFinishItemEvent, error: str | Exception) -> None:
+        super().__init__(event)
+        self.error: str | Exception = error
+
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"\u274c {self.error}")
+        self._write_duration(stream, duration)
+
+
+class ItemFinishErrorsEntry(JobWriterEntry[JobFinishItemEvent]):
+    pair_type = JobStatusWriterPair.ITEM
+    prefix = ""
+    suffix = "\n"
+
+    def __init__(self, event: JobFinishItemEvent, errors: list[str | Exception]) -> None:
+        super().__init__(event)
+        self.errors: list[str | Exception] = errors
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
         stream.write("\u274c")
         self._write_duration(stream, duration)
-        for error in self.event:
+        for error in self.errors:
             stream.write(f"\n{'  ' * depth} - \u274c {error}")
 
 
-class MessageEvent(JobStatusWriterEvent[str]):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
-class ErrorEvent(JobStatusWriterEvent[str | Exception]):
-    def __init__(self, error: str | Exception) -> None:
-        super().__init__(error)
-
+class InfoEntry(JobWriterEntry[JobInfoEvent]):
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"\u274c {self.event}")
+        stream.write(self.event.message)
 
 
-class OutputEvent(JobStatusWriterEvent[str | Iterable[str]]):
-    def __init__(self, output: str | Iterable[str], label: str, collapsible: bool = False) -> None:
-        super().__init__(output)
-        self.label: str = label
+class WarningEntry(JobWriterEntry[JobWarningEvent]):
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"⚠️ {self.event.warning}")
+
+
+class DetailEntry(JobWriterEntry[JobDetailEvent]):
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"🔎 {self.event.message}")
+
+
+class ErrorEntry(JobWriterEntry[JobErrorEvent]):
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"\u274c {self.event.error}")
+
+
+class OutputEntry(JobWriterEntry[JobOutputEvent]):
+    def __init__(self, event: JobOutputEvent, collapsible: bool = False) -> None:
+        super().__init__(event)
         self._collapsible: bool = collapsible
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
         if self._collapsible:
             stream.write("<details>\n")
-            stream.write(f"<summary>{self.label}</summary>\n")
+            stream.write(f"<summary>{self.event.label}</summary>\n")
         else:
-            stream.write(f"{self.label}:\n")
+            stream.write(f"{self.event.label}:\n")
 
-        output: str | Iterable[str] = self.event
+        output: str | Iterable[str] = self.event.output
         if isinstance(output, str):
             output = [output]
         for line in output:
@@ -312,47 +314,105 @@ class OutputEvent(JobStatusWriterEvent[str | Iterable[str]]):
             stream.write("\n\n</details>")
 
 
-class JobStatusWriter(JobStatus):
-    WARNING_CHAR: Final[str] = "⚠️"
-    DETAIL_CHAR: Final[str] = "🔎"
-
+class JobStatusWriter(JobEventHandler):
     def __init__(
         self,
         stream: TextIO,
+        include_duration: bool = False,
         show_detail: bool = True,
         collapsible_output: bool = False,
     ) -> None:
+        self._include_duration: bool = include_duration
         self._show_detail: bool = show_detail
         self._collapsible_output: bool = collapsible_output
         self._stream: TextIO = stream
-        self._event_stack: list[JobStatusWriterEvent] = []
+        self._entry_stack: list[JobWriterEntry] = []
 
-    def _write_event_and_append(self, event: JobStatusWriterEvent) -> None:
-        prev_event: JobStatusWriterEvent | None = self._event_stack[-1] if self._event_stack else None
-        duration: timedelta | None = None
-        if event.pair_type is not None and not event.is_start:
-            start_event: JobStatusWriterEvent = self._find_start_event(type(event))
-            if start_event.start:
-                duration = datetime.now() - start_event.start
-        depth: int
-        if event.pair_type in (JobStatusWriterPair.SCOPE, JobStatusWriterPair.SECTION):
-            depth = self._depth(ScopeStartEvent) + self._depth(SectionStartEvent)
+    def handle(self, event: JobEvent) -> None:
+        entry: JobWriterEntry
+        errors: list[str | Exception]
+        append_only: bool = False
+
+        if isinstance(event, JobStartScopeEvent):
+            entry = ScopeStartEntry(event)
+        elif isinstance(event, JobFinishScopeEvent):
+            errors = self._get_errors(ScopeFinishEntry)
+            if len(errors) == 1:
+                entry = ScopeFinishErrorEntry(event, errors[0])
+            elif len(errors) > 1:
+                entry = ScopeFinishErrorsEntry(event, errors)
+            else:
+                entry = ScopeFinishEntry(event)
+        elif isinstance(event, JobErrorEvent):
+            entry = ErrorEntry(event)
+            if self._depth(ItemFinishEntry) > 0:
+                # Append but don't write the error. It will be written on finish_item()
+                append_only = True
+        elif isinstance(event, JobSkipScopeEvent):
+            entry = ScopeSkippedEntry(event)
+        elif isinstance(event, JobStartSectionEvent):
+            entry = SectionStartEntry(event)
+        elif isinstance(event, JobFinishSectionEvent):
+            errors = self._get_errors(SectionFinishEntry)
+            if len(errors) == 1:
+                entry = SectionFinishErrorEntry(event, errors[0])
+            elif len(errors) > 1:
+                entry = SectionFinishErrorsEntry(event, errors)
+            else:
+                entry = SectionFinishEntry(event)
+        elif isinstance(event, JobStartItemEvent):
+            entry = ItemStartEntry(event)
+        elif isinstance(event, JobFinishItemEvent):
+            errors = self._get_errors(ItemFinishEntry, include_children=False)
+            if len(errors) == 1:
+                entry = ItemFinishErrorEntry(event, errors[0])
+            elif len(errors) > 1:
+                entry = ItemFinishErrorsEntry(event, errors)
+            else:
+                entry = ItemFinishEntry(event)
+        elif isinstance(event, JobWarningEvent):
+            entry = WarningEntry(event)
+        elif isinstance(event, JobInfoEvent):
+            entry = InfoEntry(event)
+        elif isinstance(event, JobDetailEvent):
+            if not self._show_detail:
+                return
+            entry = DetailEntry(event)
+        elif isinstance(event, JobOutputEvent):
+            entry = OutputEntry(event, collapsible=self._collapsible_output)
+        else:  # pragma: no cover
+            return
+
+        if append_only:
+            self._entry_stack.append(entry)
         else:
-            depth = self._depth(type(event))
-        event.write_event(self._stream, depth=depth, prev_event=prev_event, duration=duration)
-        self._event_stack.append(event)
+            self._write_entry_and_append(entry)
 
-    def _depth(self, event_type: type[JobStatusWriterEvent]) -> int:
-        if event_type.pair_type is None:
+    def _write_entry_and_append(self, entry: JobWriterEntry) -> None:
+        prev_event: JobWriterEntry | None = self._entry_stack[-1] if self._entry_stack else None
+        duration: timedelta | None = None
+        if self._include_duration and entry.pair_type is not None and not entry.is_start:
+            start_entry: JobWriterEntry = self._find_start_entry(type(entry))
+            duration = datetime.now() - start_entry.event.timestamp
+        depth: int
+        if entry.pair_type in (JobStatusWriterPair.SCOPE, JobStatusWriterPair.SECTION):
+            depth = self._depth(ScopeStartEntry) + self._depth(SectionStartEntry)
+        else:
+            depth = self._depth(type(entry))
+        entry.write_event(self._stream, depth=depth, prev_event=prev_event, duration=duration)
+        self._entry_stack.append(entry)
+
+    def _depth(self, entry_type: type[JobWriterEntry]) -> int:
+        if entry_type.pair_type is None:
             # Event type does not have nesting
             return 0
 
         depth: int = 0
-        for event in self._event_stack:
-            if event.pair_type != event_type.pair_type:
+        for entry in self._entry_stack:
+            if entry.pair_type != entry_type.pair_type:
                 # Not a related event
                 continue
-            if event.is_start:
+            if entry.is_start:
                 # Start event
                 depth += 1
             else:
@@ -360,123 +420,48 @@ class JobStatusWriter(JobStatus):
                 depth -= 1
         return depth
 
-    def start_scope(self, scope: JobScope, include_duration: bool = True) -> None:
-        self._write_event_and_append(ScopeStartEvent(scope, start=datetime.now() if include_duration else None))
-
-    def finish_scope(self, scope: JobScope | None = None) -> None:
-        if scope is None:
-            scope = self._find_start_event(ScopeFinishEvent).event
-        errors: list[str | Exception] = self._get_errors(ScopeFinishEvent)
-        event: ScopeFinishEvent | ScopeFinishErrorEvent | ScopeFinishErrorsEvent
-        if len(errors) == 1:
-            event = ScopeFinishErrorEvent(scope, errors[0])
-        elif len(errors) > 1:
-            event = ScopeFinishErrorsEvent(scope, errors)
-        else:
-            event = ScopeFinishEvent(scope)
-        self._write_event_and_append(event)
-
-    def skip_scope(self, scope: JobScope, reason: str | None = None) -> None:
-        self._write_event_and_append(ScopeSkippedEvent(scope, reason=reason))
-
-    def start_section(self, name: str, include_duration: bool = True) -> None:
-        self._write_event_and_append(SectionStartEvent(name, start=datetime.now() if include_duration else None))
-
-    def finish_section(self, name: str | None = None) -> None:
-        if name is None:
-            name = self._find_start_event(SectionFinishEvent).event
-        errors: list[str | Exception] = self._get_errors(SectionFinishEvent)
-        event: SectionFinishEvent | SectionFinishErrorEvent | SectionFinishErrorsEvent
-        if len(errors) == 1:
-            event = SectionFinishErrorEvent(name, errors[0])
-        elif len(errors) > 1:
-            event = SectionFinishErrorsEvent(name, errors)
-        else:
-            event = SectionFinishEvent(name)
-        self._write_event_and_append(event)
-
-    def start_item(self, event: str, include_duration: bool = False, dots: str = "...") -> None:
-        self._write_event_and_append(ItemStartEvent(event, start=datetime.now() if include_duration else None))
-
-    def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:
-        errors: list[str | Exception] = self._get_errors(ItemFinishEvent, include_children=False)
-        event: ItemFinishEvent | ItemFinishErrorEvent | ItemFinishErrorsEvent
-        if len(errors) == 1:
-            event = ItemFinishErrorEvent(errors[0])
-        elif len(errors) > 1:
-            event = ItemFinishErrorsEvent(errors)
-        else:
-            event = ItemFinishEvent(outcome)
-        self._write_event_and_append(event)
-
-    def info(self, message: str) -> None:
-        self._write_event_and_append(MessageEvent(message))
-
-    def detail(self, message: str) -> None:
-        if self._show_detail:
-            self._write_event_and_append(
-                MessageEvent(f"{self.DETAIL_CHAR} {message}"),
-            )
-
-    def warning(self, message: str | Exception) -> None:
-        self._write_event_and_append(
-            MessageEvent(f"{self.WARNING_CHAR} {message}"),
-        )
-
-    def error(self, message: str | Exception) -> None:
-        event: ErrorEvent = ErrorEvent(message)
-        if self._depth(ItemFinishEvent) > 0:
-            # Append but don't write the error. It will be written on finish_item()
-            self._event_stack.append(event)
-        else:
-            self._write_event_and_append(event)
-
-    def output(self, output: str | Iterable[str], label: str | None = None) -> None:
-        self._write_event_and_append(OutputEvent(output, label=label or "output", collapsible=self._collapsible_output))
-
-    def _get_errors(
-        self, event_type: type[JobStatusWriterEvent], include_children: bool = True
-    ) -> list[str | Exception]:
-        if event_type.pair_type is None or event_type.is_start:
+    def _get_errors(self, entry_type: type[JobWriterEntry], include_children: bool = True) -> list[str | Exception]:
+        if entry_type.pair_type is None or entry_type.is_start:
             # Event type can't have nested events (yet)
             return []
 
-        start_event: JobStatusWriterEvent = self._find_start_event(event_type)
+        start_entry: JobWriterEntry = self._find_start_entry(entry_type)
 
         errors: list[str | Exception] = []
-        start_index: int = self._event_stack.index(start_event)
+        start_index: int = self._entry_stack.index(start_entry)
         depth: int = 0
-        for event in self._event_stack[start_index:]:
-            # if event.type.pair_type == event_type.pair_type:
-            if event.pair_type is not None:
-                if event.is_start:
+        for entry in self._entry_stack[start_index:]:
+            # if entry.type.pair_type == entry_type.pair_type:
+            if entry.pair_type is not None:
+                if entry.is_start:
                     depth += 1
                 else:
                     depth -= 1
 
-            if isinstance(event, ErrorEvent) and (include_children or depth == 1):
-                errors.append(str(event.event) if not isinstance(event.event, Exception) else event.event)
+            if isinstance(entry, ErrorEntry) and (include_children or depth == 1):
+                error: str | Exception = entry.event.error
+                errors.append(str(error) if not isinstance(error, Exception) else error)
 
         return errors
 
-    def _find_start_event(self, event_type: type[JobStatusWriterEvent]) -> JobStatusWriterEvent:
-        if event_type.pair_type is None:
+    def _find_start_entry(self, entry_type: type[JobWriterEntry]) -> JobWriterEntry:
+        if entry_type.pair_type is None:
             raise JobException("Event type does not have start/finish pairs.")
 
-        if event_type.is_start:
+        if entry_type.is_start:
             raise JobException("Event type is a start event.")
 
-        events: list[JobStatusWriterEvent] = []
-        for event in self._event_stack:
-            if event.pair_type != event_type.pair_type:
+        entries: list[JobWriterEntry] = []
+        for entry in self._entry_stack:
+            if entry.pair_type != entry_type.pair_type:
                 continue
 
-            if event.is_start:
-                events.append(event)
+            if entry.is_start:
+                entries.append(entry)
             else:
-                events.pop()
+                entries.pop()
 
-        if not events:
+        if not entries:
             raise JobException("Did not find start event.")
 
-        return events[-1]
+        return entries[-1]

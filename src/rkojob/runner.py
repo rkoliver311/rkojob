@@ -53,10 +53,10 @@ class JobRunnerImpl:
         skip_reason: str
         should_skip, skip_reason = self._should_skip(context, scope)
         if should_skip:
-            context.status.skip_scope(scope, reason=skip_reason or None)
+            context.events.skip_scope(scope, reason=skip_reason or None)
             return
 
-        with context.in_scope(scope), context.status.scope(scope):
+        with context.in_scope(scope), context.events.scope(scope):
             try:
                 if group:
                     self._run_group(context, group)
@@ -78,20 +78,20 @@ class JobRunnerImpl:
                 action.action(context)
             except Exception as e:
                 # Add error to current scope's list of errors
-                context.status.error(e)
+                context.events.error(e)
 
     def _run_teardown(self, context: JobContext, teardown: JobTeardownScope) -> None:
         all_teardowns: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         all_teardowns += context.get_teardown(teardown)
         all_teardowns += teardown.teardown
         if all_teardowns:
-            with context.status.section(f"Teardown {teardown}"):
+            with context.events.section(f"Teardown {teardown}"):
                 results: list[Any] = all_teardowns(context)
                 for result in deep_flatten(results):
                     if isinstance(result, Exception):
-                        context.status.warning(result)
+                        context.events.warning(result)
         else:
-            context.status.detail(f"Skipping Teardown {teardown}")
+            context.events.detail(f"Skipping Teardown {teardown}")
 
     def _should_skip(self, context: JobContext, scope: JobScope) -> tuple[bool, str]:
         if isinstance(scope, JobConditionalScope):
