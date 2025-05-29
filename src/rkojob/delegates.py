@@ -66,6 +66,9 @@ class Delegate(Iterable[CallbackType], Generic[P, R]):
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
+    def has_callback(self, callback: CallbackType) -> bool:
+        return callback in self._callbacks
+
     def __iadd__(self, other: CallbackType | Delegate[P, R]) -> Delegate[P, R]:
         if isinstance(other, Delegate):
             for callback in other:

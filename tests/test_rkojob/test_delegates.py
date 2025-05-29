@@ -16,7 +16,7 @@ class TestDelegate(TestCase):
             return value
 
         sut.add_callback(callback)
-
+        self.assertTrue(sut.has_callback(callback))
         self.assertEqual(["value"], sut("value"))
 
     def test_remove_callback(self):
@@ -27,6 +27,7 @@ class TestDelegate(TestCase):
 
         sut.add_callback(callback)
         sut.remove_callback(callback)
+        self.assertFalse(sut.has_callback(callback))
 
         self.assertEqual([], sut("value"))
 
