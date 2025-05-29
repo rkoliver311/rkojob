@@ -15,7 +15,6 @@ from typing import (
     Protocol,
     Set,
     TypeAlias,
-    TypeGuard,
     TypeVar,
     cast,
     final,
@@ -50,7 +49,7 @@ NoValue: Final[NoValueType] = NoValueType()
 """Sentinel value to distinguish from ``None``."""
 
 
-def _is_value(value: T | NoValueType) -> TypeGuard[T]:
+def _is_value(value: T | NoValueType) -> bool:
     """
     ``TypeGuard`` to insist that `value` is not ``NoValue``.
     :param value: The value check.
@@ -95,7 +94,7 @@ class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
         self._name: str | None = name
 
         if _is_value(value):
-            self.value = value
+            self.value = cast(T, value)
 
     def get(self) -> T:
         """
@@ -249,7 +248,7 @@ class LazyValue(ValueProvider[T]):
             raise NoValueError(f"{repr(self)} has no value")
         if not _is_value(self._value):
             self._value = self._func()
-        return self._value
+        return cast(T, self._value)
 
     @property
     def has_value(self) -> bool:
