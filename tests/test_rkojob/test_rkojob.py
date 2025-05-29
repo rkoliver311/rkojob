@@ -13,6 +13,8 @@ from rkojob import (
     JobContext,
     JobException,
     JobResolvableValue,
+    JobScopeID,
+    JobScopeStack,
     JobStatusCollector,
     ValueKey,
     assign_value,
@@ -256,9 +258,147 @@ class TestJobStatusCollector(TestCase):
 
 
 class StubScope:
-    def __init__(self, name, type):
+    def __init__(self, name, type, id=None):
         self.name = name
         self.type = type
+        self.id = id or create_scope_id()
+
+
+class TestJobScopeStack(TestCase):
+    def test_get(self) -> None:
+        scope1 = StubScope("scope1", "type")
+
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        self.assertIsNone(sut.get(scope1))
+
+        sut.push(scope1, "scope1")
+        self.assertEqual("scope1", sut[scope1])
+
+    def test_get_scope(self) -> None:
+        scope1 = StubScope("scope1", "type")
+
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        self.assertIsNone(sut.get_scope())
+
+        sut.push(scope1, "scope1")
+        self.assertEqual(scope1, sut.get_scope())
+
+    def test_scope(self) -> None:
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        with self.assertRaises(JobException) as e:
+            _ = sut.scope
+        self.assertEqual("Scope stack underflow.", str(e.exception))
+
+        with self.assertRaises(JobException) as e:
+            _ = sut.value
+        self.assertEqual("Scope stack underflow.", str(e.exception))
+
+        scope1 = StubScope("scope1", "type")
+        sut.push(scope1, "scope1")
+        self.assertEqual(scope1, sut.scope)
+        self.assertEqual("scope1", sut.value)
+
+    def test_path_to(self) -> None:
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        sut.push(scope1, "scope1")
+        sut.push(scope2, "scope2")
+        sut.push(scope3, "scope3")
+
+        self.assertEqual((scope1,), sut.path_to(scope1))
+        self.assertEqual((scope1, scope2), sut.path_to(scope2))
+        self.assertEqual((scope1, scope2, scope3), sut.path_to(scope3))
+
+    def test_push_pop_peek(self) -> None:
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        sut.push(scope1, "scope1")
+        sut.push(scope2, "scope2")
+        sut.push(scope3, "scope3")
+
+        self.assertEqual((scope3, "scope3"), sut.peek())
+        self.assertEqual((scope3, "scope3"), sut.pop())
+
+        self.assertEqual((scope2, "scope2"), sut.peek())
+        self.assertEqual((scope2, "scope2"), sut.pop())
+
+        self.assertEqual((scope1, "scope1"), sut.peek())
+        self.assertEqual((scope1, "scope1"), sut.pop())
+
+        with self.assertRaises(JobException) as e:
+            _, _ = sut.peek()
+        self.assertEqual("Scope stack underflow.", str(e.exception))
+
+        with self.assertRaises(JobException) as e:
+            _, _ = sut.pop()
+        self.assertEqual("Scope stack underflow.", str(e.exception))
+
+    def test_len(self) -> None:
+        sut: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        sut.push(scope1, None)
+        sut.push(scope2, None)
+        sut.push(scope3, None)
+        self.assertEqual(3, len(sut))
+
+    def test_items(self) -> None:
+        sut: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        sut.push(scope1, None)
+        sut.push(scope2, None)
+        sut.push(scope3, None)
+        self.assertEqual(list({scope3: None, scope2: None, scope1: None}.items()), list(sut.items()))
+
+    def test_iter(self) -> None:
+        sut: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        self.assertEqual(list({}), list(sut))
+
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        sut.push(scope1, None)
+        sut.push(scope2, None)
+        sut.push(scope3, None)
+        self.assertEqual(list({scope3: None, scope2: None, scope1: None}), list(sut))
+
+    def test_bool(self) -> None:
+        sut: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        self.assertFalse(bool(sut))
+
+        sut.push(StubScope("name", "type"), None)
+        self.assertTrue(bool(sut))
+
+    def test_fork(self) -> None:
+        sut: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        mock_scope_1 = MagicMock()
+        mock_scope_2 = MagicMock()
+        mock_scope_3 = MagicMock()
+
+        sut.push(mock_scope_1)
+        sut.push(mock_scope_2)
+
+        fork = sut.fork()
+        self.assertIs(sut._default_factory, fork._default_factory)
+        self.assertTrue(fork.at_fork)
+
+        fork.push(mock_scope_3)
+        self.assertFalse(fork.at_fork)
+
+        self.assertEqual([mock_scope_2, mock_scope_1], list(sut))
+        self.assertEqual([mock_scope_3, mock_scope_2, mock_scope_1], list(fork))
+
+        fork.pop()
+        self.assertTrue(fork.at_fork)
+        self.assertEqual(list(sut), list(fork))
 
 
 class TestContextValue(TestCase):

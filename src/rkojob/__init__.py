@@ -9,12 +9,15 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from contextlib import contextmanager
+from copy import copy
 from enum import Enum, auto
 from typing import (
     Any,
     Callable,
     Generator,
     Generic,
+    Iterator,
+    Mapping,
     ParamSpec,
     Protocol,
     Tuple,
@@ -342,6 +345,97 @@ class JobGroupScope(JobScope, Protocol):
 
     @property
     def scopes(self) -> list[JobScope]: ...
+
+
+K = TypeVar("K", bound=JobScopeID)
+V = TypeVar("V")
+
+
+class JobScopeStackNode(Generic[K, V]):
+    def __init__(self, key: K, value: V, parent: JobScopeStackNode[K, V] | None) -> None:
+        self.key: K = key
+        self.value: V = value
+        self.parent: JobScopeStackNode[K, V] | None = parent
+
+
+class JobScopeStack(Generic[K, V], Mapping[K, V]):
+
+    def __init__(self, default_factory: Callable[[], V] | None = None) -> None:
+        self._node: JobScopeStackNode[K, V] | None = None
+        self._nodes: dict[K, JobScopeStackNode[K, V]] = {}
+        if default_factory is None:
+
+            def default_factory() -> V:
+                return None  # type: ignore[return-value]
+
+        self._default_factory: Callable[[], V] = default_factory
+
+        # Set when a stack is a fork. Indicates where the fork occurred
+        self._forked_node: JobScopeStackNode[K, V] | None = None
+
+    def push(self, key: K, value: V | None = None) -> None:
+        if value is None:
+            value = self._default_factory()
+        self._node = JobScopeStackNode(key, value, self._node)
+        self._nodes[key] = self._node
+
+    def pop(self) -> tuple[K, V]:
+        if self._node is None:
+            raise JobException("Scope stack underflow.")
+        node: JobScopeStackNode[K, V] = self._node
+        self._node = self._node.parent
+        self._nodes.pop(node.key)
+        return node.key, node.value
+
+    def peek(self) -> tuple[K, V]:
+        if self._node is None:
+            raise JobException("Scope stack underflow.")
+        return self._node.key, self._node.value
+
+    def get_scope(self) -> K | None:
+        if self._node is None:
+            return None
+        return self._node.key
+
+    @property
+    def scope(self) -> K:
+        return self.peek()[0]
+
+    @property
+    def value(self) -> V:
+        return self.peek()[1]
+
+    def path_to(self, key: K) -> tuple[K, ...]:
+        path: list[K] = []
+        node: JobScopeStackNode[K, V] | None = self._nodes.get(key)
+        while node:
+            path.append(node.key)
+            node = node.parent
+        return tuple(reversed(path))
+
+    def fork(self) -> JobScopeStack[K, V]:
+        fork: JobScopeStack[K, V] = type(self)()
+        fork._node = self._node
+        fork._nodes = copy(self._nodes)
+        fork._default_factory = self._default_factory
+        fork._forked_node = self._node
+        return fork
+
+    @property
+    def at_fork(self) -> bool:
+        return self._node is self._forked_node
+
+    def __getitem__(self, key: K, /) -> V:
+        return self._nodes[key].value
+
+    def __len__(self) -> int:
+        return len(self._nodes)
+
+    def __iter__(self) -> Iterator[K]:
+        node: JobScopeStackNode[K, V] | None = self._node
+        while node is not None:
+            yield node.key
+            node = node.parent
 
 
 R_co = TypeVar("R_co", covariant=True)
