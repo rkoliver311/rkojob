@@ -2,8 +2,9 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
+
 from threading import RLock
-from typing import Iterable, cast
+from typing import Callable, Iterable, cast
 
 from rkojob import (
     JobContext,
@@ -300,3 +301,31 @@ class JobLocalEventDispatcher(JobEventDispatcher):
 
     def flush(self) -> None:
         self._buffer.flush()
+
+
+JobEventRoutePredicate = Callable[[JobEvent], bool]
+
+
+class JobRoutingEventDispatcher(JobEventDispatcher):
+    ALWAYS: JobEventRoutePredicate = lambda _: True
+
+    def __init__(self) -> None:
+        self._routes: dict[JobEventRoutePredicate, JobEventDispatcher] = {}
+
+    def add_handler(self, handler: JobEventHandler, predicate: JobEventRoutePredicate | None = None) -> None:
+        if predicate is None:
+            predicate = JobRoutingEventDispatcher.ALWAYS
+        if predicate not in self._routes:
+            self._routes[predicate] = JobDirectEventDispatcher()
+        self._routes[predicate].add_handler(handler)
+
+    def remove_handler(self, handler: JobEventHandler, predicate: JobEventRoutePredicate | None = None) -> None:
+        if predicate is None:
+            predicate = JobRoutingEventDispatcher.ALWAYS
+        if predicate in self._routes:
+            self._routes[predicate].remove_handler(handler)
+
+    def handle(self, event: JobEvent) -> None:
+        for predicate, dispatcher in self._routes.items():
+            if predicate(event):
+                dispatcher.handle(event)

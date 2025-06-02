@@ -20,6 +20,7 @@ from rkojob.events import (
     JobJoinContextEvent,
     JobLocalEventDispatcher,
     JobOutputEvent,
+    JobRoutingEventDispatcher,
     JobSkipScopeEvent,
     JobStartItemEvent,
     JobStartScopeEvent,
@@ -540,3 +541,68 @@ class TestJobLocalEventDispatcher(TestCase):
         sut.remove_handler(handler2)
         sut.handle(MagicMock())
         self.assertEqual([mock_event], handler2.events)
+
+
+class TestJobRoutingEventDispatcher(TestCase):
+    def test(self) -> None:
+        mock_handler1 = MagicMock(handle=MagicMock())
+        mock_handler2 = MagicMock(handle=MagicMock())
+        mock_event1 = MagicMock(data={"field": "abc"})
+        mock_event2 = MagicMock(data={"field": "xyz"})
+        mock_event3 = MagicMock(data={"field": "123"})
+
+        def predicate1(event: JobEvent) -> bool:
+            return event.data["field"] == "abc"
+
+        def predicate2(event: JobEvent) -> bool:
+            return event.data["field"] == "xyz"
+
+        def predicate3(event: JobEvent) -> bool:
+            return event.data["field"] == "123"
+
+        sut = JobRoutingEventDispatcher()
+        # Do some various operations to reach a final state
+        sut.add_handler(mock_handler1, predicate=predicate1)
+        sut.add_handler(mock_handler2, predicate=predicate1)
+        sut.add_handler(mock_handler2, predicate=predicate3)
+        sut.add_handler(mock_handler2, predicate=predicate2)
+        sut.remove_handler(mock_handler2, predicate=predicate1)
+        sut.add_handler(mock_handler1, predicate=predicate3)
+
+        sut.handle(mock_event1)
+        sut.handle(mock_event2)
+        sut.handle(mock_event3)
+
+        mock_handler1.handle.assert_has_calls([call(mock_event1), call(mock_event3)])
+        mock_handler2.handle.assert_has_calls([call(mock_event2), call(mock_event3)])
+
+    def test_no_predicate(self) -> None:
+        mock_handler1 = MagicMock(handle=MagicMock())
+        mock_handler2 = MagicMock(handle=MagicMock())
+        mock_event1 = MagicMock(data={"field": "abc"})
+        mock_event2 = MagicMock(data={"field": "xyz"})
+        mock_event3 = MagicMock(data={"field": "123"})
+
+        sut = JobRoutingEventDispatcher()
+
+        sut.add_handler(mock_handler1)
+        sut.add_handler(mock_handler2)
+
+        sut.handle(mock_event1)
+        sut.handle(mock_event2)
+        sut.handle(mock_event3)
+
+        mock_handler1.handle.assert_has_calls([call(mock_event1), call(mock_event2), call(mock_event3)])
+        mock_handler2.handle.assert_has_calls([call(mock_event1), call(mock_event2), call(mock_event3)])
+
+        mock_handler1.reset_mock()
+        mock_handler2.reset_mock()
+
+        sut.remove_handler(mock_handler2)
+
+        sut.handle(mock_event1)
+        sut.handle(mock_event2)
+        sut.handle(mock_event3)
+
+        mock_handler1.handle.assert_has_calls([call(mock_event1), call(mock_event2), call(mock_event3)])
+        mock_handler2.handle.assert_not_called()
