@@ -371,6 +371,20 @@ class TestJobStatusWriter(TestCase):
             stream.getvalue(),
         )
 
+    def test_finish_scope_one_error(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream)
+        mock_context = MagicMock()
+
+        scope = StubScope("name", "type")
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=scope))
+        sut.handle(JobErrorEvent(mock_context, scope, "error"))
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=scope))
+        self.assertEqual(
+            "# type name\n\n❌ error\n\n❌ Finished **type name**\n❌ error\n\n",
+            stream.getvalue(),
+        )
+
     def test_skip_scope(self) -> None:
         stream: StringIO = StringIO()
         sut = JobStatusWriter(stream=stream)

@@ -40,7 +40,6 @@ from rkojob.events import (
     JobStatusImpl,
 )
 from rkojob.factories import JobFuturesFactory
-from rkojob.writer import JobStatusWriter
 
 
 class JobScopeStatuses(JobEventHandler):
@@ -124,18 +123,16 @@ class JobScopeStatuses(JobEventHandler):
 
 
 class JobContextState:
-    def __init__(self, values: dict[str, Any] | None = None, status_writer: JobStatusWriter | None = None):
+    def __init__(self, events: JobEventDispatcher | None, values: dict[str, Any] | None):
+        if events is None:
+            events = JobDirectEventDispatcher()
         if values is None:
             values = {}
+        self.events: JobEventDispatcher = events
         self.values: Values = Values(**values)
-
-        self.events: JobEventDispatcher = JobDirectEventDispatcher()
 
         self.scope_statuses: JobScopeStatuses = JobScopeStatuses()
         self.events.add_handler(self.scope_statuses)
-
-        if status_writer:
-            self.events.add_handler(status_writer)
 
 
 class JobScopeState:
@@ -151,13 +148,12 @@ class JobContextImpl(JobContext, JobEventHandler):
         self,
         *,
         values: dict[str, Any] | None = None,
-        status_writer: JobStatusWriter | None = None,
-        state: JobContextState | None = None,
         events: JobEventDispatcher | None = None,
+        state: JobContextState | None = None,
     ) -> None:
         # State shared by all contexts (global)
         if state is None:
-            state = JobContextState(values, status_writer)
+            state = JobContextState(events=events, values=values)
         self._shared_state: JobContextState = state
         self._shared_state.events.add_handler(self)
 

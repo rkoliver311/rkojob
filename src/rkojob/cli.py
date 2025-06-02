@@ -12,7 +12,8 @@ from typing import Any, Final
 
 import yaml
 
-from rkojob import JobException, JobScope
+from rkojob import JobEventDispatcher, JobException, JobScope
+from rkojob.events import JobDirectEventDispatcher
 from rkojob.factories import JobContextFactory, JobRunnerFactory
 from rkojob.writer import JobStatusWriter
 
@@ -63,18 +64,21 @@ class Cli:
         values: dict[str, Any] = self.read_values(args)
 
         try:
-            context = JobContextFactory.create(values=values, status_writer=self.get_status_writer())
+            events: JobEventDispatcher = self.get_event_dispatcher()
+            status_writer: JobStatusWriter = self.get_status_writer()
+            events.add_handler(status_writer)
+
+            context = JobContextFactory.create(events=events, values=values)
             JobRunnerFactory.create().run(context, job)
             return self.success()
         except Exception as e:
             return self.error(f"Error during job run: {e}")
 
-    def get_status_writer(self) -> JobStatusWriter | None:
-        return (
-            JobStatusWriter(stream=sys.stdout, show_detail=False, collapsible_output=True)
-            if self.is_github_actions
-            else None
-        )
+    def get_event_dispatcher(self) -> JobEventDispatcher:
+        return JobDirectEventDispatcher()
+
+    def get_status_writer(self) -> JobStatusWriter:
+        return JobStatusWriter(stream=sys.stdout, show_detail=False, collapsible_output=self.is_github_actions)
 
     @property
     def is_github_actions(self) -> bool:

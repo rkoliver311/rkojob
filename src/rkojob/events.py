@@ -285,7 +285,6 @@ class JobBufferedEventHandler(JobEventHandler):
 
 class JobLocalEventDispatcher(JobEventDispatcher):
     def __init__(self, flush_to: JobEventHandler) -> None:
-        super().__init__()
         self._buffer: JobBufferedEventHandler = JobBufferedEventHandler(flush_to)
         self._events: JobEventDispatcher = JobDirectEventDispatcher()
         self._events.add_handler(self._buffer)
