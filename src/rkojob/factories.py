@@ -3,8 +3,6 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-import sys
-
 from rkojob import JobContext, JobFutures, JobRunner
 
 
@@ -12,13 +10,8 @@ class JobContextFactory:
     @classmethod
     def create(cls, *args, **kwargs) -> JobContext:
         from rkojob.context import JobContextImpl
-        from rkojob.writer import JobStatusWriter
 
-        status_writer: JobStatusWriter = kwargs.get("status_writer") or JobStatusWriter(
-            stream=sys.stdout,
-            show_detail=False,
-        )
-        return JobContextImpl(values=kwargs.get("values"), status_writer=status_writer)
+        return JobContextImpl(events=kwargs.get("events"), values=kwargs.get("values"))
 
 
 class JobRunnerFactory:

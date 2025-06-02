@@ -16,7 +16,7 @@ import yaml
 
 from rkojob import JobException
 from rkojob.cli import Cli
-from rkojob.writer import JobStatusWriter
+from rkojob.events import JobDirectEventDispatcher
 
 
 class TestCli(TestCase):
@@ -108,10 +108,11 @@ class TestCli(TestCase):
         sut: Cli = Cli()
 
         mock_getenv.return_value = None
-        self.assertIsNone(sut.get_status_writer())
+        self.assertFalse(sut.get_status_writer()._collapsible_output)
 
         mock_getenv.return_value = "true"
         status_writer = sut.get_status_writer()
-        self.assertIsInstance(status_writer, JobStatusWriter)
-        assert status_writer is not None
         self.assertTrue(status_writer._collapsible_output)
+
+    def test_get_event_dispatcher(self) -> None:
+        self.assertIsInstance(Cli().get_event_dispatcher(), JobDirectEventDispatcher)
