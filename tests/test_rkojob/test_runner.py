@@ -2,8 +2,8 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
 from enum import Enum, auto
+from types import SimpleNamespace
 from unittest import TestCase
 
 from rkojob import (
@@ -31,6 +31,7 @@ class StubScope:
         if teardown:
             self.teardown += teardown
         self.id = id or create_scope_id()
+        self.concurrent = False
 
 
 class StubGroupScope(StubScope):
@@ -109,13 +110,8 @@ class TestJobRunnerImpl(TestCase):
         )
 
     def test_bad_scope(self):
-        class StubScope:
-            def __init__(self, name, type):
-                self.name = name
-                self.type = type
-
         with self.assertRaises(JobException) as e:
-            JobRunnerImpl().run(JobContextFactory.create(), StubScope("name", "scope-type"))
+            JobRunnerImpl().run(JobContextFactory.create(), SimpleNamespace(type="scope-type"))
         self.assertEqual("Unknown scope type: scope-type", str(e.exception))
 
     def test_action_method_as_teardown(self) -> None:
