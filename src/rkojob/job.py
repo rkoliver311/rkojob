@@ -63,6 +63,7 @@ class JobStep(JobScopeIDMixin, Generic[A]):
         action: A | None = None,
         run_if: JobConditionalType | None = None,
         skip_if: JobConditionalType | None = None,
+        concurrent: bool = False,
         id: JobIdType | None = None,
     ) -> None:
         self._name: str = name
@@ -70,6 +71,7 @@ class JobStep(JobScopeIDMixin, Generic[A]):
         self._action: A | None = None
         self._run_if: JobConditionalType | None = run_if
         self._skip_if: JobConditionalType | None = skip_if
+        self._concurrent: bool = concurrent
         self._id = id or create_scope_id()
 
         if action:
@@ -82,6 +84,10 @@ class JobStep(JobScopeIDMixin, Generic[A]):
     @property
     def type(self) -> JobScopeType:
         return JobScopes.STEP
+
+    @property
+    def concurrent(self) -> bool:
+        return self._concurrent
 
     @property
     def action(self) -> A | None:
@@ -119,11 +125,14 @@ class JobStage(JobScopeIDMixin):
     Class representing a job stage that consists of one or more steps.
     """
 
-    def __init__(self, name: str, steps: list[JobStep] | None = None, id: JobIdType | None = None) -> None:
+    def __init__(
+        self, name: str, steps: list[JobStep] | None = None, concurrent: bool = False, id: JobIdType | None = None
+    ) -> None:
         self._name: str = name
         if steps is None:
             steps = []
         self.steps: list[JobStep] = steps
+        self._concurrent: bool = concurrent
         self._id: JobIdType = id or create_scope_id()
 
     @property
@@ -133,6 +142,10 @@ class JobStage(JobScopeIDMixin):
     @property
     def type(self) -> JobScopeType:
         return JobScopes.STAGE
+
+    @property
+    def concurrent(self) -> bool:
+        return self._concurrent
 
     @property
     def scopes(self) -> list[JobStep]:
@@ -166,6 +179,10 @@ class Job(JobScopeIDMixin):
         return JobScopes.JOB
 
     @property
+    def concurrent(self) -> bool:
+        return False
+
+    @property
     def scopes(self) -> list[JobStage]:
         return self.stages
 
@@ -179,12 +196,15 @@ class Job(JobScopeIDMixin):
 class JobStepBuilder(JobScopeIDMixin):
     def __init__(self, name: str) -> None:
         self._name: str = name
+
+        self.builds_type: JobScopeType = JobScopes.STEP
+        self._id: JobIdType = create_scope_id()
+
         self.action: JobCallable[None] | None = None
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.run_if: JobConditionalType | None = None
         self.skip_if: JobConditionalType | None = None
-        self._id: JobIdType = create_scope_id()
-        self.builds_type: JobScopeType = JobScopes.STEP
+        self.concurrent: bool = False
 
     def build(self) -> JobStep:
         step: JobStep = JobStep(
@@ -193,6 +213,7 @@ class JobStepBuilder(JobScopeIDMixin):
             run_if=self.run_if,
             skip_if=self.skip_if,
             id=self._id,
+            concurrent=self.concurrent,
         )
         step.teardown += self.teardown
         return step
@@ -204,10 +225,13 @@ class JobStepBuilder(JobScopeIDMixin):
 class JobStageBuilder(JobScopeIDMixin):
     def __init__(self, name: str) -> None:
         self._name: str = name
+
+        self.builds_type: JobScopeType = JobScopes.STAGE
+        self._id: JobIdType = create_scope_id()
+
         self._steps: list[JobStep] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
-        self._id: JobIdType = create_scope_id()
-        self.builds_type: JobScopeType = JobScopes.STAGE
+        self.concurrent: bool = False
 
     @contextmanager
     def step(self, name: str) -> Generator[JobStepBuilder, None, None]:
@@ -216,7 +240,7 @@ class JobStageBuilder(JobScopeIDMixin):
         self._steps.append(builder.build())
 
     def build(self) -> JobStage:
-        stage: JobStage = JobStage(name=self._name, steps=self._steps, id=self._id)
+        stage: JobStage = JobStage(name=self._name, steps=self._steps, concurrent=self.concurrent, id=self._id)
         stage.teardown += self.teardown
         return stage
 

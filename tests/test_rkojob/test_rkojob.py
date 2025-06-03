@@ -70,6 +70,7 @@ class StubScope:
         self.name = name
         self.type = type
         self.id = id or create_scope_id()
+        self.concurrent = False
 
 
 class TestJobScopeStack(TestCase):

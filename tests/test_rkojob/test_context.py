@@ -207,6 +207,7 @@ class StubScope(JobScopeIDMixin):
         if teardown:
             self.teardown += teardown
         self._id = id or create_scope_id()
+        self.concurrent = False
 
     def __str__(self):
         return f"{self.type} {self.name}"
@@ -296,10 +297,6 @@ class TestJobContextImpl(TestCase):
         self.assertEqual(f"Scope '{stub_scope_3}' is not in scope", str(e.exception))
 
     def test_resolve_scope(self) -> None:
-        class StubScopeID:
-            def __init__(self, id):
-                self.id = id
-
         mock_scope = MagicMock(id="scope_id")
 
         sut = JobContextImpl()
@@ -369,6 +366,7 @@ class TestJobContextImpl(TestCase):
             name = "scope"
             type = StubScopeType.JOB
             id = "id"
+            concurrent = False
 
         non_teardown_scope = NonTeardownScope()
         sut.push_scope(non_teardown_scope)

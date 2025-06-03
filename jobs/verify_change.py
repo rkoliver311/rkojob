@@ -18,6 +18,7 @@ with JobBuilder("verify-change") as job:
     with job.stage("static-analysis") as static_analysis:
         # Use explicit name for verify_test_structure so it can be run separately
         with static_analysis.step("verify-test-structure") as verify_test_structure:
+            verify_test_structure.concurrent = True
             verify_test_structure.action = lazy_action(
                 VerifyTestStructure,
                 src_path=context_value("src_path"),

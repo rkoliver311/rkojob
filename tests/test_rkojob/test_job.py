@@ -84,6 +84,9 @@ class TestJobStep(TestCase):
     def test_name(self):
         self.assertEqual("name", JobStep("name").name)
 
+    def test_concurrent(self):
+        self.assertTrue(JobStep("name", concurrent=True).concurrent)
+
     def test_action(self):
         mock_action = MagicMock()
         self.assertIs(mock_action, JobStep("name", action=mock_action).action)
@@ -140,6 +143,9 @@ class TestJobStage(TestCase):
         self.assertEqual("scope_id", JobStage("name", id="scope_id").id)
         self.assertIsNotNone(JobStage("name", id=None).id)
 
+    def test_concurrent(self):
+        self.assertTrue(JobStage("name", concurrent=True).concurrent)
+
     def test_str(self) -> None:
         self.assertEqual("Stage name", str(JobStage("name")))
 
@@ -152,6 +158,7 @@ class TestJob(TestCase):
         self.assertEqual(2, len(sut.stages))
         self.assertEqual("stage1", sut.stages[0].name)
         self.assertEqual("stage2", sut.stages[1].name)
+        self.assertFalse(sut.concurrent)
 
     def test_no_stages(self):
         sut = Job(name="job")
@@ -180,6 +187,7 @@ class TestJobStepBuilder(TestCase):
         sut.teardown += mock_teardown2
         sut.run_if = mock_run_if
         sut.skip_if = mock_skip_if
+        sut.concurrent = True
 
         step = sut.build()
         self.assertEqual("step", step.name)
@@ -188,6 +196,7 @@ class TestJobStepBuilder(TestCase):
         self.assertIn(mock_teardown2, step.teardown)
         self.assertIs(sut.run_if, step.run_if)
         self.assertIs(sut.skip_if, step.skip_if)
+        self.assertEqual(sut.concurrent, step.concurrent)
         self.assertEqual(sut.id, step.id)
 
     def test_builder_as_scope_id(self) -> None:
@@ -219,9 +228,11 @@ class TestJobStageBuilder(TestCase):
             step3.action = mock_action3
         sut.teardown += mock_teardown1
         sut.teardown += mock_teardown2
+        sut.concurrent = True
         stage = sut.build()
         self.assertEqual("stage", stage.name)
         self.assertEqual(sut.id, stage.id)
+        self.assertEqual(sut.concurrent, stage.concurrent)
         self.assertIn(mock_teardown1, stage.teardown)
         self.assertIn(mock_teardown2, stage.teardown)
         self.assertEqual("step1", stage.steps[0].name)
