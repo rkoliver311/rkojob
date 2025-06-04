@@ -54,8 +54,8 @@ class JobException(Exception):
 class JobEvent:
     type: str
 
-    def __init__(self, context: JobContextID, scope: JobScopeID | None, **data) -> None:
-        self.context: JobContextID = context
+    def __init__(self, context: JobContext, scope: JobScopeID | None, **data) -> None:
+        self.context: JobContext = context
         self.scope: JobScopeID | None = scope
         self.timestamp: datetime = datetime.now()
         self.data: dict[str, Any] = data
@@ -154,14 +154,14 @@ class JobScopeStatus(Enum):
     UNKNOWN = auto()
 
 
-JobContextID: TypeAlias = str
+JobIdType: TypeAlias = str
 
 
-def create_context_id() -> JobContextID:
+def create_context_id() -> JobIdType:
     """
     Creates a new, unique context ID value.
     """
-    return JobContextID(uuid4())
+    return JobIdType(uuid4())
 
 
 class JobContext(Protocol):
@@ -174,7 +174,7 @@ class JobContext(Protocol):
     """
 
     @property
-    def id(self) -> JobContextID: ...
+    def id(self) -> JobIdType: ...
     def push_scope(self, scope: JobScope) -> None: ...
     def pop_scope(self) -> JobScope: ...
     @property
@@ -195,11 +195,11 @@ class JobContext(Protocol):
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
 
 
-def create_scope_id() -> str:
+def create_scope_id() -> JobIdType:
     """
     Creates a new, unique scope ID value.
     """
-    return str(uuid4())
+    return JobIdType(uuid4())
 
 
 @runtime_checkable
@@ -209,7 +209,7 @@ class JobScopeID(Protocol):
     """
 
     @property
-    def id(self) -> str: ...
+    def id(self) -> JobIdType: ...
 
 
 class JobScopeType(Protocol):

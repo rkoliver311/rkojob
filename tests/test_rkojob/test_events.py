@@ -31,7 +31,7 @@ class StubContext:
         self._scopes = JobScopeStack()
 
     def handle(self, event):
-        if event.context == self.id:
+        if event.context.id == self.id:
             if isinstance(event, JobStartScopeEvent):
                 self._scopes.push(event.started_scope)
             elif isinstance(event, JobFinishScopeEvent):
@@ -114,9 +114,7 @@ class TestJobStatusImpl(TestCase):
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
 
         sut.start_scope(mock_scope)
-        self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope
-        )
+        self.assertHandledEvent(mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope)
 
     def test_finish_scope(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -125,9 +123,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_scope(mock_scope)
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope
-        )
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope)
 
     def test_finish_scope_no_scope(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -136,16 +132,14 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_scope()
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope
-        )
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope)
 
     def test_skip_scope(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
 
         sut.skip_scope(mock_scope, "skipped")
         self.assertHandledEvent(
-            mock_handler.handle, JobSkipScopeEvent, stub_context.id, None, skipped_scope=mock_scope, reason="skipped"
+            mock_handler.handle, JobSkipScopeEvent, stub_context, None, skipped_scope=mock_scope, reason="skipped"
         )
 
     def test_start_section(self) -> None:
@@ -155,9 +149,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.start_section("section")
-        self.assertHandledEvent(
-            mock_handler.handle, JobStartSectionEvent, stub_context.id, mock_scope, section="section"
-        )
+        self.assertHandledEvent(mock_handler.handle, JobStartSectionEvent, stub_context, mock_scope, section="section")
 
     def test_finish_section(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -166,9 +158,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_section("section")
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishSectionEvent, stub_context.id, mock_scope, section="section"
-        )
+        self.assertHandledEvent(mock_handler.handle, JobFinishSectionEvent, stub_context, mock_scope, section="section")
 
     def test_start_item(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -177,7 +167,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.start_item("item")
-        self.assertHandledEvent(mock_handler.handle, JobStartItemEvent, stub_context.id, mock_scope, item="item")
+        self.assertHandledEvent(mock_handler.handle, JobStartItemEvent, stub_context, mock_scope, item="item")
 
     def test_finish_item(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -186,7 +176,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_item("ok")
-        self.assertHandledEvent(mock_handler.handle, JobFinishItemEvent, stub_context.id, mock_scope, outcome="ok")
+        self.assertHandledEvent(mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="ok")
 
     def test_finish_item_with_error(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -195,11 +185,9 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.finish_item(outcome="fail", error="timeout")
+        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error="timeout", index=0)
         self.assertHandledEvent(
-            mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error="timeout", index=0
-        )
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishItemEvent, stub_context.id, mock_scope, outcome="fail", index=1
+            mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="fail", index=1
         )
 
     def test_info(self) -> None:
@@ -209,7 +197,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.info("step done")
-        self.assertHandledEvent(mock_handler.handle, JobInfoEvent, stub_context.id, mock_scope, message="step done")
+        self.assertHandledEvent(mock_handler.handle, JobInfoEvent, stub_context, mock_scope, message="step done")
 
     def test_detail(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -218,7 +206,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.detail("debug")
-        self.assertHandledEvent(mock_handler.handle, JobDetailEvent, stub_context.id, mock_scope, message="debug")
+        self.assertHandledEvent(mock_handler.handle, JobDetailEvent, stub_context, mock_scope, message="debug")
 
     def test_warning(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -227,7 +215,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.warning("warning")
-        self.assertHandledEvent(mock_handler.handle, JobWarningEvent, stub_context.id, mock_scope, warning="warning")
+        self.assertHandledEvent(mock_handler.handle, JobWarningEvent, stub_context, mock_scope, warning="warning")
 
     def test_error(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -236,7 +224,7 @@ class TestJobStatusImpl(TestCase):
         mock_handler.reset_mock()
 
         sut.error("error")
-        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error="error")
+        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error="error")
 
     def test_output(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
@@ -248,7 +236,7 @@ class TestJobStatusImpl(TestCase):
         self.assertHandledEvent(
             mock_handler.handle,
             JobOutputEvent,
-            stub_context.id,
+            stub_context,
             mock_scope,
             output=["line 1", "line 2"],
             label="stdout",
@@ -261,10 +249,10 @@ class TestJobStatusImpl(TestCase):
             pass
 
         self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=1
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=1
         )
 
     def test_scope_error(self) -> None:
@@ -277,11 +265,11 @@ class TestJobStatusImpl(TestCase):
                 raise error
 
         self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
         )
-        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error=error, index=1)
+        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=1)
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=2
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=2
         )
 
     def test_section(self) -> None:
@@ -292,16 +280,16 @@ class TestJobStatusImpl(TestCase):
                 pass
 
         self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobStartSectionEvent, stub_context.id, mock_scope, section="section", index=1
+            mock_handler.handle, JobStartSectionEvent, stub_context, mock_scope, section="section", index=1
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishSectionEvent, stub_context.id, mock_scope, section="section", index=2
+            mock_handler.handle, JobFinishSectionEvent, stub_context, mock_scope, section="section", index=2
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=3
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=3
         )
 
     def test_section_error(self) -> None:
@@ -315,18 +303,18 @@ class TestJobStatusImpl(TestCase):
                     raise error
 
         self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobStartSectionEvent, stub_context.id, mock_scope, section="section", index=1
+            mock_handler.handle, JobStartSectionEvent, stub_context, mock_scope, section="section", index=1
         )
-        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error=error, index=2)
+        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=2)
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishSectionEvent, stub_context.id, mock_scope, section="section", index=3
+            mock_handler.handle, JobFinishSectionEvent, stub_context, mock_scope, section="section", index=3
         )
-        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error=error, index=4)
+        self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=4)
         self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=5
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=5
         )
 
     def test_item(self) -> None:
@@ -337,16 +325,14 @@ class TestJobStatusImpl(TestCase):
                 pass
 
         self.assertHandledEvent(
-            mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+        )
+        self.assertHandledEvent(mock_handler.handle, JobStartItemEvent, stub_context, mock_scope, item="item", index=1)
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="done.", index=2
         )
         self.assertHandledEvent(
-            mock_handler.handle, JobStartItemEvent, stub_context.id, mock_scope, item="item", index=1
-        )
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishItemEvent, stub_context.id, mock_scope, outcome="done.", index=2
-        )
-        self.assertHandledEvent(
-            mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=3
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=3
         )
 
     def test_item_error(self) -> None:
@@ -360,22 +346,18 @@ class TestJobStatusImpl(TestCase):
                     raise error
 
             self.assertHandledEvent(
-                mock_handler.handle, JobStartScopeEvent, stub_context.id, None, started_scope=mock_scope, index=0
+                mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
             )
             self.assertHandledEvent(
-                mock_handler.handle, JobStartItemEvent, stub_context.id, mock_scope, item="item", index=1
+                mock_handler.handle, JobStartItemEvent, stub_context, mock_scope, item="item", index=1
             )
+            self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=2)
             self.assertHandledEvent(
-                mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error=error, index=2
+                mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="done.", index=3
             )
+            self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=4)
             self.assertHandledEvent(
-                mock_handler.handle, JobFinishItemEvent, stub_context.id, mock_scope, outcome="done.", index=3
-            )
-            self.assertHandledEvent(
-                mock_handler.handle, JobErrorEvent, stub_context.id, mock_scope, error=error, index=4
-            )
-            self.assertHandledEvent(
-                mock_handler.handle, JobFinishScopeEvent, stub_context.id, None, finished_scope=mock_scope, index=5
+                mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=5
             )
 
 

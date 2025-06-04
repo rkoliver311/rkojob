@@ -13,11 +13,11 @@ from typing import (
 from rkojob import (
     JobCallable,
     JobContext,
-    JobContextID,
     JobEvent,
     JobEventDispatcher,
     JobEventHandler,
     JobException,
+    JobIdType,
     JobScope,
     JobScopeID,
     JobScopeStack,
@@ -128,7 +128,7 @@ class JobScopeState:
 class JobContextImpl(JobContext):
     def __init__(self, *, values: dict[str, Any] | None = None, status_writer: JobStatusWriter | None = None) -> None:
         # State that pushes and pops with the scope.
-        self._id: JobContextID = create_context_id()
+        self._id: JobIdType = create_context_id()
         self._scope_stack: JobScopeStack[JobScope, JobScopeState] = JobScopeStack(default_factory=JobScopeState)
 
         if values is None:
@@ -146,11 +146,11 @@ class JobContextImpl(JobContext):
             self._events.add_handler(status_writer)
 
     @property
-    def id(self) -> JobContextID:
+    def id(self) -> JobIdType:
         return self._id
 
     def handle(self, event: JobEvent):
-        if event.context == self.id:
+        if event.context.id == self.id:
             if isinstance(event, JobStartScopeEvent):
                 self.push_scope(self._resolve_scope(event.started_scope))
             elif isinstance(event, JobFinishScopeEvent):
