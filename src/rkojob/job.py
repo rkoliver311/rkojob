@@ -14,6 +14,7 @@ from rkojob import (
     JobCallable,
     JobConditionalType,
     JobContext,
+    JobIdType,
     JobScopeID,
     JobScopeType,
     create_scope_id,
@@ -33,10 +34,10 @@ class JobScopes(Enum):
 
 
 class JobScopeIDMixin(JobScopeID):
-    _id: str
+    _id: JobIdType
 
     @property
-    def id(self) -> str:
+    def id(self) -> JobIdType:
         return self._id
 
     def __eq__(self, other: object) -> bool:
@@ -62,7 +63,7 @@ class JobStep(JobScopeIDMixin, Generic[A]):
         action: A | None = None,
         run_if: JobConditionalType | None = None,
         skip_if: JobConditionalType | None = None,
-        id: str | None = None,
+        id: JobIdType | None = None,
     ) -> None:
         self._name: str = name
 
@@ -118,12 +119,12 @@ class JobStage(JobScopeIDMixin):
     Class representing a job stage that consists of one or more steps.
     """
 
-    def __init__(self, name: str, steps: list[JobStep] | None = None, id: str | None = None) -> None:
+    def __init__(self, name: str, steps: list[JobStep] | None = None, id: JobIdType | None = None) -> None:
         self._name: str = name
         if steps is None:
             steps = []
         self.steps: list[JobStep] = steps
-        self._id: str = id or create_scope_id()
+        self._id: JobIdType = id or create_scope_id()
 
     @property
     def name(self) -> str:
@@ -149,12 +150,12 @@ class Job(JobScopeIDMixin):
     Class representing a job that consists of one or more stages.
     """
 
-    def __init__(self, name: str, stages: list[JobStage] | None = None, id: str | None = None) -> None:
+    def __init__(self, name: str, stages: list[JobStage] | None = None, id: JobIdType | None = None) -> None:
         self._name: str = name
         if stages is None:
             stages = []
         self.stages: list[JobStage] = stages
-        self._id: str = id or create_scope_id()
+        self._id: JobIdType = id or create_scope_id()
 
     @property
     def name(self) -> str:
@@ -182,7 +183,7 @@ class JobStepBuilder(JobScopeIDMixin):
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.run_if: JobConditionalType | None = None
         self.skip_if: JobConditionalType | None = None
-        self._id: str = create_scope_id()
+        self._id: JobIdType = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.STEP
 
     def build(self) -> JobStep:
@@ -205,7 +206,7 @@ class JobStageBuilder(JobScopeIDMixin):
         self._name: str = name
         self._steps: list[JobStep] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
-        self._id: str = create_scope_id()
+        self._id: JobIdType = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.STAGE
 
     @contextmanager
@@ -228,7 +229,7 @@ class JobBuilder(JobScopeIDMixin, AbstractContextManager):
         self._name: str = name
         self._stages: list[JobStage] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
-        self._id: str = create_scope_id()
+        self._id: JobIdType = create_scope_id()
         self.builds_type: JobScopeType = JobScopes.JOB
 
     def __exit__(self, exc_type, exc_value, traceback, /):

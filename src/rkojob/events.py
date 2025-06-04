@@ -7,7 +7,6 @@ from typing import Iterable, cast
 
 from rkojob import (
     JobContext,
-    JobContextID,
     JobEvent,
     JobEventDispatcher,
     JobEventHandler,
@@ -21,7 +20,7 @@ from rkojob import (
 class JobStartScopeEvent(JobEvent):
     type = "start_scope"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID | None, started_scope: JobScopeID) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID | None, started_scope: JobScopeID) -> None:
         super().__init__(context, scope, started_scope=started_scope)
 
     @property
@@ -32,7 +31,7 @@ class JobStartScopeEvent(JobEvent):
 class JobFinishScopeEvent(JobEvent):
     type = "finish_scope"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID | None, finished_scope: JobScopeID) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID | None, finished_scope: JobScopeID) -> None:
         super().__init__(context, scope, finished_scope=finished_scope)
 
     @property
@@ -43,7 +42,7 @@ class JobFinishScopeEvent(JobEvent):
 class JobErrorEvent(JobEvent):
     type = "error"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID | None, error: str | Exception) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID | None, error: str | Exception) -> None:
         super().__init__(context, scope, error=error)
 
     @property
@@ -55,7 +54,7 @@ class JobSkipScopeEvent(JobEvent):
     type = "skip_scope"
 
     def __init__(
-        self, context: JobContextID, scope: JobScopeID | None, skipped_scope: JobScopeID, reason: str | None = None
+        self, context: JobContext, scope: JobScopeID | None, skipped_scope: JobScopeID, reason: str | None = None
     ) -> None:
         super().__init__(context, scope, skipped_scope=skipped_scope, reason=reason)
 
@@ -71,7 +70,7 @@ class JobSkipScopeEvent(JobEvent):
 class JobStartSectionEvent(JobEvent):
     type = "start_section"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, section: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, section: str) -> None:
         super().__init__(context, scope, section=section)
 
     @property
@@ -82,7 +81,7 @@ class JobStartSectionEvent(JobEvent):
 class JobFinishSectionEvent(JobEvent):
     type = "finish_section"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, section: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, section: str) -> None:
         super().__init__(context, scope, section=section)
 
     @property
@@ -93,7 +92,7 @@ class JobFinishSectionEvent(JobEvent):
 class JobStartItemEvent(JobEvent):
     type = "start_item"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, item: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, item: str) -> None:
         super().__init__(context, scope, item=item)
 
     @property
@@ -104,7 +103,7 @@ class JobStartItemEvent(JobEvent):
 class JobFinishItemEvent(JobEvent):
     type = "finish_item"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, outcome: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, outcome: str) -> None:
         super().__init__(context, scope, outcome=outcome)
 
     @property
@@ -115,7 +114,7 @@ class JobFinishItemEvent(JobEvent):
 class JobWarningEvent(JobEvent):
     type = "warning"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, warning: str | Exception) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, warning: str | Exception) -> None:
         super().__init__(context, scope, warning=warning)
 
     @property
@@ -126,7 +125,7 @@ class JobWarningEvent(JobEvent):
 class JobInfoEvent(JobEvent):
     type = "info"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, message: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, message: str) -> None:
         super().__init__(context, scope, message=message)
 
     @property
@@ -137,7 +136,7 @@ class JobInfoEvent(JobEvent):
 class JobDetailEvent(JobEvent):
     type = "detail"
 
-    def __init__(self, context: JobContextID, scope: JobScopeID, message: str) -> None:
+    def __init__(self, context: JobContext, scope: JobScopeID, message: str) -> None:
         super().__init__(context, scope, message=message)
 
     @property
@@ -149,7 +148,7 @@ class JobOutputEvent(JobEvent):
     type = "output"
 
     def __init__(
-        self, context: JobContextID, scope: JobScopeID, output: str | Iterable[str], label: str | None = None
+        self, context: JobContext, scope: JobScopeID, output: str | Iterable[str], label: str | None = None
     ) -> None:
         super().__init__(context, scope, output=output, label=label or "output")
 
@@ -175,46 +174,46 @@ class JobStatusImpl(JobStatus):
         self._handler.handle(event)
 
     def start_scope(self, scope: JobScopeID) -> None:
-        self.handle(JobStartScopeEvent(self._context.id, self._context.get_scope(), started_scope=scope))
+        self.handle(JobStartScopeEvent(self._context, self._context.get_scope(), started_scope=scope))
 
     def finish_scope(self, scope: JobScopeID | None = None) -> None:
         if scope is None:
             scope = self._context.scope
         self.handle(
-            JobFinishScopeEvent(self._context.id, self._context.get_scope(scope, generation=1), finished_scope=scope)
+            JobFinishScopeEvent(self._context, self._context.get_scope(scope, generation=1), finished_scope=scope)
         )
 
     def skip_scope(self, scope: JobScopeID, reason: str | None = None) -> None:
-        self.handle(JobSkipScopeEvent(self._context.id, self._context.get_scope(), skipped_scope=scope, reason=reason))
+        self.handle(JobSkipScopeEvent(self._context, self._context.get_scope(), skipped_scope=scope, reason=reason))
 
     def start_section(self, section: str) -> None:
-        self.handle(JobStartSectionEvent(self._context.id, self._context.scope, section=section))
+        self.handle(JobStartSectionEvent(self._context, self._context.scope, section=section))
 
     def finish_section(self, section: str) -> None:
-        self.handle(JobFinishSectionEvent(self._context.id, self._context.scope, section=section))
+        self.handle(JobFinishSectionEvent(self._context, self._context.scope, section=section))
 
     def start_item(self, item: str) -> None:
-        self.handle(JobStartItemEvent(self._context.id, self._context.scope, item=item))
+        self.handle(JobStartItemEvent(self._context, self._context.scope, item=item))
 
     def finish_item(self, outcome: str = "done.", error: str | Exception | None = None) -> None:
         if error:
             self.error(error)
-        self.handle(JobFinishItemEvent(self._context.id, self._context.scope, outcome=outcome))
+        self.handle(JobFinishItemEvent(self._context, self._context.scope, outcome=outcome))
 
     def info(self, message: str) -> None:
-        self.handle(JobInfoEvent(self._context.id, self._context.scope, message=message))
+        self.handle(JobInfoEvent(self._context, self._context.scope, message=message))
 
     def detail(self, message: str) -> None:
-        self.handle(JobDetailEvent(self._context.id, self._context.scope, message=message))
+        self.handle(JobDetailEvent(self._context, self._context.scope, message=message))
 
     def warning(self, warning: str | Exception) -> None:
-        self.handle(JobWarningEvent(self._context.id, self._context.scope, warning=warning))
+        self.handle(JobWarningEvent(self._context, self._context.scope, warning=warning))
 
     def error(self, error: str | Exception) -> None:
-        self.handle(JobErrorEvent(self._context.id, self._context.scope, error=error))
+        self.handle(JobErrorEvent(self._context, self._context.scope, error=error))
 
     def output(self, output: str | Iterable[str], label: str | None = None) -> None:
-        self.handle(JobOutputEvent(self._context.id, self._context.scope, output=output, label=label))
+        self.handle(JobOutputEvent(self._context, self._context.scope, output=output, label=label))
 
 
 class JobDirectEventDispatcher(JobEventDispatcher):
