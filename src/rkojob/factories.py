@@ -5,7 +5,7 @@
 
 import sys
 
-from rkojob import JobContext, JobRunner
+from rkojob import JobContext, JobFutures, JobRunner
 
 
 class JobContextFactory:
@@ -27,3 +27,11 @@ class JobRunnerFactory:
         from rkojob.runner import JobRunnerImpl
 
         return JobRunnerImpl()
+
+
+class JobFuturesFactory:
+    @classmethod
+    def create(cls, *args, **kwargs) -> JobFutures:
+        from rkojob.concurrent import JobFuturesImpl
+
+        return JobFuturesImpl()

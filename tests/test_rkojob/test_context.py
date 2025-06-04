@@ -30,6 +30,7 @@ from rkojob.events import (
     JobStartScopeEvent,
 )
 from rkojob.job import JobScopeIDMixin
+from tests.test_rkojob.test_runner import StubGroupScope
 
 
 class TestJobScopeStatuses(TestCase):
@@ -456,3 +457,35 @@ class TestJobContextImpl(TestCase):
 
             fork.join()
             self.assertEqual([{"message": "Hello!"}], [event.data for event in handler.events])
+
+    def test_get_futures(self) -> None:
+        stub_scope = StubScope("scope", "scope")
+        stub_group_scope = StubGroupScope("group-scope", "group", scopes=[stub_scope])
+
+        side_effects: list[str] = []
+
+        sut: JobContextImpl = JobContextImpl()
+        with sut.events.scope(stub_group_scope):
+            with sut.events.scope(stub_scope):
+                futures = sut.get_futures(stub_group_scope)
+
+                def task(context: JobContext, format: str) -> None:
+                    side_effects.append(format.format(context.scope))
+
+                futures.submit(sut, task, sut, "Hello from {0}!")
+            futures.futures[0].result()
+        self.assertEqual([f"Hello from {stub_scope}!"], side_effects)
+
+    def test_get_futures_negative(self) -> None:
+        sut: JobContextImpl = JobContextImpl()
+
+        stub_scope = StubScope("scope", "scope")
+        stub_group_scope = StubGroupScope("group-scope", "group", scopes=[stub_scope])
+        with self.assertRaises(JobException) as e:
+            _ = sut.get_futures(stub_group_scope)
+        self.assertEqual(f"Scope {stub_group_scope} is not an active scope.", str(e.exception))
+
+        with sut.events.scope(stub_scope):
+            with self.assertRaises(JobException) as e:
+                _ = sut.get_futures(stub_scope)
+            self.assertEqual(f"Scope {stub_scope} does not support futures.", str(e.exception))

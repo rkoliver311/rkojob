@@ -17,6 +17,8 @@ from rkojob import (
     JobEventDispatcher,
     JobEventHandler,
     JobException,
+    JobFutures,
+    JobGroupScope,
     JobIdType,
     JobScope,
     JobScopeID,
@@ -37,6 +39,7 @@ from rkojob.events import (
     JobStartScopeEvent,
     JobStatusImpl,
 )
+from rkojob.factories import JobFuturesFactory
 from rkojob.writer import JobStatusWriter
 
 
@@ -139,6 +142,8 @@ class JobScopeState:
     def __init__(self) -> None:
         # Teardown actions registered ad-hoc
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True, reverse=True)
+        # Futures that can be executed during this scope and will be joined before the scope exits
+        self.futures: JobFutures = JobFuturesFactory.create()
 
 
 class JobContextImpl(JobContext, JobEventHandler):
@@ -249,6 +254,14 @@ class JobContextImpl(JobContext, JobEventHandler):
         if scope not in self._scope_stack:
             raise JobException(f"Scope {scope} is not an active scope.")
         return self._scope_stack[scope].teardown
+
+    def get_futures(self, scope: JobScopeID) -> JobFutures:
+        scope = self._resolve_scope(scope)
+        if not isinstance(scope, JobGroupScope):
+            raise JobException(f"Scope {scope} does not support futures.")
+        if scope not in self._scope_stack:
+            raise JobException(f"Scope {scope} is not an active scope.")
+        return self._scope_stack[scope].futures
 
     def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope | None:
         """
