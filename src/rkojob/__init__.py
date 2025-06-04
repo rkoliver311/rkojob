@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from concurrent.futures import Future
 from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
@@ -160,6 +161,29 @@ class JobScopeStatus(Enum):
     UNKNOWN = auto()
 
 
+R = TypeVar("R")
+P = ParamSpec("P")
+
+
+class JobFuture(Protocol[R]):
+    @property
+    def context(self) -> JobContext: ...
+    @property
+    def done(self) -> bool: ...
+    @property
+    def running(self) -> bool: ...
+    def result(self, timeout: float | None = ...) -> R: ...
+    @property
+    def future(self) -> Future[R]: ...
+
+
+class JobFutures(Protocol):
+    def submit(self, context: JobContext, task: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> JobFuture[R]: ...
+    @property
+    def futures(self) -> list[JobFuture[Any]]: ...
+    def shutdown(self) -> None: ...
+
+
 JobIdType: TypeAlias = str
 
 
@@ -191,6 +215,7 @@ class JobContext(Protocol):
     def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
     def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
     def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]: ...
+    def get_futures(self, scope: JobScopeID) -> JobFutures: ...
     def error(self, error: str | Exception) -> Exception: ...
     def get_errors(self, scope: JobScopeID | None = ...) -> list[Exception]: ...
     def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]: ...
@@ -774,10 +799,6 @@ class JobRunner(Protocol):
     """
 
     def run(self, context: JobContext, scope: JobScope) -> None: ...
-
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
 class job_action(JobAction, Generic[P, R]):

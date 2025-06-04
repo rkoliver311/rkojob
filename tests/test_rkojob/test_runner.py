@@ -3,6 +3,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 from enum import Enum, auto
+from threading import Event
 from types import SimpleNamespace
 from unittest import TestCase
 
@@ -11,6 +12,7 @@ from rkojob import (
     JobCallable,
     JobContext,
     JobException,
+    ValueKey,
     ValueRef,
     create_scope_id,
     job_succeeding,
@@ -24,25 +26,28 @@ from rkojob.util import not_none
 
 
 class StubScope:
-    def __init__(self, name, type, teardown=None, id=None):
+    def __init__(self, name, type, teardown=None, id=None, concurrent=False):
         self.name = name
         self.type = type
         self.teardown = Delegate[[JobContext], None](continue_on_error=True)
         if teardown:
             self.teardown += teardown
         self.id = id or create_scope_id()
-        self.concurrent = False
+        self.concurrent = concurrent
+
+    def __str__(self):
+        return f"{self.type} {self.name}"
 
 
 class StubGroupScope(StubScope):
-    def __init__(self, name, type, scopes, teardown=None, id=None):
-        super().__init__(name, type, teardown, id)
+    def __init__(self, name, type, scopes, teardown=None, id=None, concurrent=False):
+        super().__init__(name, type, teardown, id, concurrent)
         self.scopes = scopes
 
 
 class StubActionScope(StubScope):
-    def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None, id=None):
-        super().__init__(name, type, teardown, id)
+    def __init__(self, name, type, action=None, teardown=None, run_if=None, skip_if=None, id=None, concurrent=False):
+        super().__init__(name, type, teardown, id, concurrent)
         self.action = action
         self.run_if = run_if
         self.skip_if = skip_if
@@ -111,7 +116,7 @@ class TestJobRunnerImpl(TestCase):
 
     def test_bad_scope(self):
         with self.assertRaises(JobException) as e:
-            JobRunnerImpl().run(JobContextFactory.create(), SimpleNamespace(type="scope-type"))
+            JobRunnerImpl().run(JobContextFactory.create(), SimpleNamespace(type="scope-type", concurrent=False))
         self.assertEqual("Unknown scope type: scope-type", str(e.exception))
 
     def test_action_method_as_teardown(self) -> None:
@@ -466,3 +471,102 @@ class TestJobRunnerImpl(TestCase):
         sut = JobRunnerImpl()
         step = StubActionScope("step", 3, skip_if=True)
         self.assertEqual((True, ""), sut._should_skip(context, step))
+
+    def test_concurrent(self) -> None:
+        side_effects_key = ValueKey[list[str]]("side_effects")
+        side_effects_event_key = ValueKey[Event]("side_effects_event")
+
+        def foreground_action(context: JobContext):
+            context.values.get(side_effects_key).append("Hello from the foreground!")
+            context.values.get(side_effects_event_key).set()
+
+        def background_action(context: JobContext):
+            context.values.get(side_effects_event_key).wait()
+            context.values.get(side_effects_key).append("Hello from the background!")
+
+        def failing_background_action(context: JobContext):
+            context.values.get(side_effects_event_key).wait()
+            raise JobException("Boom!")
+
+        job = StubGroupScope(
+            "job",
+            StubScopeType.JOB,
+            scopes=[
+                StubActionScope("background_step", StubScopeType.STEP, action=background_action, concurrent=True),
+                StubGroupScope(
+                    "stage",
+                    StubScopeType.STAGE,
+                    scopes=[
+                        StubActionScope(
+                            "failing_background_step",
+                            StubScopeType.STEP,
+                            action=failing_background_action,
+                            concurrent=True,
+                        ),
+                        StubActionScope("step", StubScopeType.STEP, action=foreground_action),
+                    ],
+                ),
+            ],
+        )
+
+        side_effects: list[str] = []
+        side_effects_event: Event = Event()
+        context = JobContextFactory.create(
+            values=dict(side_effects=side_effects, side_effects_event=side_effects_event)
+        )
+
+        sut = JobRunnerImpl()
+        with self.assertRaises(JobException):
+            sut.run(context, job)
+
+        self.assertEqual(["Hello from the foreground!", "Hello from the background!"], side_effects)
+
+    def test_concurrent_with_error(self) -> None:
+        side_effects_key = ValueKey[list[str]]("side_effects")
+        side_effects_event_key = ValueKey[Event]("side_effects_event")
+
+        def background_action(context: JobContext):
+            # Demonstrate avoid deadlock when event never set
+            if context.values.get(side_effects_event_key).wait(timeout=0.1):
+                context.values.get(side_effects_key).append("Hello from the background!")
+
+        def failing_action(_context: JobContext):
+            raise JobException("Boom!")
+
+        def foreground_action(context: JobContext):
+            context.values.get(side_effects_key).append("Hello from the foreground!")
+            context.values.get(side_effects_event_key).set()
+
+        job = StubGroupScope(
+            "job",
+            StubScopeType.JOB,
+            scopes=[
+                StubGroupScope(
+                    "stage",
+                    StubScopeType.STAGE,
+                    scopes=[
+                        StubActionScope(
+                            "background_step", StubScopeType.STEP, action=background_action, concurrent=True
+                        ),
+                        StubActionScope(
+                            "failing_action",
+                            StubScopeType.STEP,
+                            action=failing_action,
+                        ),
+                        StubActionScope("step", StubScopeType.STEP, action=foreground_action),
+                    ],
+                ),
+            ],
+        )
+
+        side_effects: list[str] = []
+        side_effects_event: Event = Event()
+        context = JobContextFactory.create(
+            values=dict(side_effects=side_effects, side_effects_event=side_effects_event)
+        )
+
+        sut = JobRunnerImpl()
+        with self.assertRaises(JobException):
+            sut.run(context, job)
+
+        self.assertEqual([], side_effects)

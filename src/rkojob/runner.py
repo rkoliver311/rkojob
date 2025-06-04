@@ -3,8 +3,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-from contextlib import contextmanager
-from typing import Any, Generator, cast
+from typing import Any, cast
 
 import yaml
 
@@ -15,6 +14,8 @@ from rkojob import (
     JobConditionalValueType,
     JobContext,
     JobException,
+    JobFuture,
+    JobFutures,
     JobGroupScope,
     JobScope,
     JobScopeID,
@@ -80,12 +81,6 @@ class JobRunnerImpl:
         # Run and then teardown a scope.
         # If the scope is a group, recursively run and teardown child scopes.
 
-        group: JobGroupScope | None = scope if isinstance(scope, JobGroupScope) else None
-        action: JobActionScope | None = scope if isinstance(scope, JobActionScope) else None
-        teardown: JobTeardownScope | None = scope if isinstance(scope, JobTeardownScope) else None
-        if not (group or action or teardown):
-            raise self._unknown_scope(context, scope)
-
         should_skip: bool
         skip_reason: str
         should_skip, skip_reason = self._should_skip(context, scope)
@@ -93,28 +88,54 @@ class JobRunnerImpl:
             context.events.skip_scope(scope, reason=skip_reason or None)
             return
 
-        with self._fork_if_needed(context, scope) as forked_context, forked_context.events.scope(scope):
+        if scope.concurrent:
+            # The scope will be run concurrently and will be joined
+            # during the teardown of the current (i.e. parent) scope.
+            self._fork_concurrent_scope(context, scope)
+        else:
+            self._real_run_scope(context, scope)
+
+    def _fork_concurrent_scope(self, context: JobContext, scope: JobScope) -> None:
+        futures: JobFutures = context.get_futures(context.scope)
+        forked_context: JobContext = context.fork()
+        context.events.fork_context(forked_context)
+
+        futures.submit(forked_context, self._real_run_scope, forked_context, scope)
+
+    def _join_concurrent_scope(self, context: JobContext, future: JobFuture[None]) -> None:
+        forked_context: JobContext = future.context
+        try:
+            future.result()
+        except Exception as e:  # pragma: no cover
+            forked_context.events.error(e)
+            raise
+        finally:
+            forked_context.join()
+            context.events.join_context(forked_context)
+
+    def _join_concurrent_scopes(self, context: JobContext, scope: JobScope) -> None:
+        futures: JobFutures = context.get_futures(scope)
+        for future in futures.futures:
+            self._join_concurrent_scope(context, future)
+
+    def _real_run_scope(self, context: JobContext, scope: JobScope) -> None:
+        group: JobGroupScope | None = scope if isinstance(scope, JobGroupScope) else None
+        action: JobActionScope | None = scope if isinstance(scope, JobActionScope) else None
+        teardown: JobTeardownScope | None = scope if isinstance(scope, JobTeardownScope) else None
+        if not (group or action or teardown):
+            raise self._unknown_scope(context, scope)
+
+        with context.events.scope(scope):
             try:
                 if group:
-                    self._run_group(forked_context, group)
+                    self._run_group(context, group)
                 elif action:
-                    self._run_action(forked_context, action)
+                    self._run_action(context, action)
             finally:
+                if group:
+                    self._join_concurrent_scopes(context, group)
                 if teardown:
-                    self._run_teardown(forked_context, teardown)
-
-    @contextmanager
-    def _fork_if_needed(self, context: JobContext, scope: JobScope) -> Generator[JobContext, None, None]:
-        if scope.concurrent:
-            forked_context: JobContext = context.fork()
-            context.events.fork_context(forked_context)
-            try:
-                yield forked_context
-            finally:
-                context.events.join_context(forked_context)
-                forked_context.join()
-        else:
-            yield context
+                    self._run_teardown(context, teardown)
 
     def _run_group(self, context: JobContext, group: JobGroupScope) -> None:
         # Recursively run a group's child scopes
