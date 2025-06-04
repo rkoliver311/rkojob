@@ -117,8 +117,6 @@ class VerifyTestStructure(JobAction):
         # Iterate over source path, predict the name of the test file, and assert that it exists
         self._verify_directory(context, src_path, tests_path, src_path, errors)
         assign_value(self.errors, errors, context=context)
-        if errors:
-            raise JobException(f"Missing tests: {errors}")
 
     def _verify_directory(
         self, context: JobContext, src_path: Path, tests_path: Path, source_dir: Path, errors: list[str]
@@ -137,15 +135,14 @@ class VerifyTestStructure(JobAction):
                     context.events.detail(f"Skipping {child}")
                     continue
 
-                context.events.start_item(str(child.relative_to(src_path)))
-                error: str | None = "missing" if not expected_test_path.exists() else None
-                context.events.finish_item(str(expected_test_path.relative_to(tests_path)), error=error)
+                relative_child: str = str(child.relative_to(src_path))
+                context.events.start_item(relative_child)
+                relative_test: str = str(expected_test_path.relative_to(tests_path))
+                error: str | None = None if expected_test_path.exists() else f"missing: {relative_test}"
+                context.events.finish_item(relative_test, error=error)
 
                 if error:
-                    message: str = (
-                        f"Test path for source path '{child.relative_to(src_path)}' not found: "
-                        f"{expected_test_path.relative_to(tests_path)}"
-                    )
+                    message: str = f"Test path for source path '{relative_child}' not found: {relative_test}"
                     errors.append(message)
 
     def _expected_test_path(self, src_path: Path, tests_path: Path, source_path: Path) -> Path | None:

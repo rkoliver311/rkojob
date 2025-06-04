@@ -127,12 +127,7 @@ class TestVerifyTestStructure(TestCase):
             context = JobContextFactory.create()
             stub_scope = StubScope("scope", "type")
             with context.events.scope(stub_scope):
-                with self.assertRaises(JobException) as e:
-                    sut.action(context)
-            self.assertEqual(
-                "Missing tests: [\"Test path for source path 'foo/baz.py' not found: test_foo/test_baz.py\"]",
-                str(e.exception),
-            )
+                sut.action(context)
             self.assertEqual(
                 ["Test path for source path 'foo/baz.py' not found: test_foo/test_baz.py"], sut.errors.value
             )
