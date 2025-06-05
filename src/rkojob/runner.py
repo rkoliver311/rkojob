@@ -5,6 +5,8 @@
 
 from typing import Any, cast
 
+import yaml
+
 from rkojob import (
     JobActionScope,
     JobConditionalScope,
@@ -14,6 +16,7 @@ from rkojob import (
     JobException,
     JobGroupScope,
     JobScope,
+    JobScopeID,
     JobTeardownScope,
     job_failing,
     job_never,
@@ -35,9 +38,42 @@ class JobRunnerImpl:
         :param scope: The scope to run.
         """
         self._run_scope(context, scope)
-        errors: list[Exception] = context.get_errors()
-        if errors:
-            raise JobException("\n".join([str(e) for e in errors]))
+        self._check_for_errors(context)
+
+    def _check_for_errors(self, context: JobContext):
+        report: dict[JobScopeID, Any] = context.get_report()
+
+        if self._has_errors(report):
+            errors = self._gather_errors(report)
+            report_str: str = yaml.dump(errors)
+            raise JobException(report_str)
+
+    def _has_errors(self, report: dict[JobScopeID, Any]) -> bool:
+        for scope in report:
+            if report[scope].get("errors"):
+                return True
+            if self._has_errors(report[scope].get("scopes")):
+                return True
+        return False
+
+    def _gather_errors(self, report: dict[JobScopeID, Any]) -> dict[str, Any] | None:
+        if not self._has_errors(report):
+            return None
+        errors: dict[str, Any] = {}
+        for scope in report:
+            scope_str: str = str(scope)
+            scope_report = report[scope]
+
+            scope_errors: list[str | Exception] = scope_report.get("errors")
+            if scope_errors:
+                errors[scope_str] = {"errors": [str(error) for error in scope_errors]}
+
+            child_errors: dict[str, Any] | None = self._gather_errors(scope_report.get("scopes", {}))
+            if child_errors:
+                if scope_str not in errors:
+                    errors[scope_str] = {}
+                errors[scope_str].update(**child_errors)
+        return errors
 
     def _run_scope(self, context: JobContext, scope: JobScope) -> None:
         # Run and then teardown a scope.

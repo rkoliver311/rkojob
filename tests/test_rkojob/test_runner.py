@@ -100,9 +100,8 @@ class TestJobRunnerImpl(TestCase):
         # This teardown should run
         job.teardown += self._teardown("job", side_effects)
 
-        with self.assertRaises(Exception) as e:
+        with self.assertRaises(Exception):
             JobRunnerImpl().run(JobContextFactory.create(), job)
-        self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
 
         self.assertEqual(
             ["Action: job->stage1->step1.1", "Teardown job: step1.1", "Teardown job: job"],
@@ -338,9 +337,8 @@ class TestJobRunnerImpl(TestCase):
         side_effects.clear()
         job.scopes[0].scopes[0].action = self._action(side_effects, fail=True)
 
-        with self.assertRaises(Exception) as e:
+        with self.assertRaises(Exception):
             JobRunnerImpl().run(JobContextFactory.create(), job)
-        self.assertEqual("Action failed: job->stage1->step1.1", str(e.exception))
 
         self.assertEqual(
             [
@@ -400,9 +398,8 @@ class TestJobRunnerImpl(TestCase):
         side_effects: list[str] = []
         job = self._create_job(side_effects)
         job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
-        with self.assertRaises(Exception) as e:
+        with self.assertRaises(Exception):
             JobRunnerImpl().run(JobContextFactory.create(), job)
-        self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
 
         self.assertEqual(
             [
@@ -443,9 +440,8 @@ class TestJobRunnerImpl(TestCase):
         job = self._create_job(side_effects)
         job.scopes[0].scopes[1].action = self._action(side_effects, fail=True)
         job.scopes[1].scopes[0].skip_if = scope_succeeding(job.scopes[0])
-        with self.assertRaises(Exception) as e:
+        with self.assertRaises(Exception):
             JobRunnerImpl().run(JobContextFactory.create(), job)
-        self.assertEqual("Action failed: job->stage1->step1.2", str(e.exception))
 
         self.assertEqual(
             [

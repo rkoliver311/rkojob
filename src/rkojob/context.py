@@ -46,19 +46,44 @@ class JobScopeStatuses(JobEventHandler):
     """
 
     def __init__(self) -> None:
-        self._scope_stack: JobScopeStack[JobScopeID, None] = JobScopeStack()
+        self._scope_stack: JobScopeStack[JobScopeID, list[str | Exception]] = JobScopeStack(default_factory=list)
         self._statuses: dict[JobScopeID, JobScopeStatus] = {}
-        self._errors: dict[tuple[JobScopeID, ...], list[str | Exception]] = {}
+        self._global_errors: list[str | Exception] = []
 
     def get_status(self, scope: JobScopeID) -> JobScopeStatus:
         return self._statuses.get(scope, JobScopeStatus.UNKNOWN)
 
     def get_errors(self, scope: JobScopeID | None = None) -> list[str | Exception]:
         errors: list[str | Exception] = []
-        for scopes in self._errors:
-            if scope is None or scope in scopes:
-                errors.extend(self._errors[scopes])
+        scopes: list[JobScopeID]
+        if scope is None:
+            scopes = list(self._scope_stack.all_nodes)
+        else:
+            scopes = [scope, *self._scope_stack.children_of(scope)]
+
+        for key in reversed(scopes):
+            errs = self._scope_stack[key]
+            errors.extend(errs)
+
+        if scope is None:
+            errors.extend(self._global_errors)
+
         return errors
+
+    def get_report(self, scope: JobScopeID | None = None) -> dict[JobScopeID, Any]:
+        if scope is None:
+            scope = next(iter(self._scope_stack.all_nodes), None)
+        if scope is None:
+            return {}
+        return {
+            scope: {
+                "status": self.get_status(scope),
+                "errors": self._scope_stack[scope],
+                "scopes": {
+                    child: self.get_report(child)[child] for child in self._scope_stack.children_of(scope, depth=1)
+                },
+            }
+        }
 
     def handle(self, event: JobEvent) -> None:
         if isinstance(event, JobStartScopeEvent):
@@ -68,7 +93,7 @@ class JobScopeStatuses(JobEventHandler):
         elif isinstance(event, JobSkipScopeEvent):
             self._skip_scope(event.skipped_scope)
         elif isinstance(event, JobErrorEvent):
-            self._error(event.error)
+            self._error(event.scope, event.error)
 
     def _start_scope(self, scope: JobScopeID) -> None:
         if self.get_status(scope) != JobScopeStatus.UNKNOWN:
@@ -85,13 +110,11 @@ class JobScopeStatuses(JobEventHandler):
     def _skip_scope(self, scope: JobScopeID) -> None:
         self._statuses[scope] = JobScopeStatus.SKIPPED
 
-    def _error(self, error: Exception | str) -> None:
-        scope: JobScopeID | None = self._scope_stack.get_scope()
-        path: tuple[JobScopeID, ...] = self._scope_stack.path_to(scope) if scope else tuple()
-        if path not in self._errors:
-            self._errors[path] = []
-        self._errors[path].append(error)
-        if scope:
+    def _error(self, scope: JobScopeID | None, error: Exception | str) -> None:
+        if scope is None:
+            self._global_errors.append(error)
+        else:
+            self._scope_stack[scope].append(error)
             # If we have a running scope mark it as failing
             self._statuses[scope] = JobScopeStatus.FAILING
 
@@ -245,6 +268,9 @@ class JobContextImpl(JobContext):
     @property
     def events(self) -> JobStatus:
         return self._status
+
+    def get_report(self, scope: JobScopeID | None = None) -> dict[JobScopeID, Any]:
+        return self._scope_statuses.get_report(scope)
 
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus:
         return self._scope_statuses.get_status(scope)

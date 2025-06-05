@@ -96,6 +96,100 @@ class TestJobScopeStatuses(TestCase):
         sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=mock_scope_1))
         self.assertEqual(JobScopeStatus.FAILED, sut.get_status(mock_scope_1))
 
+    def test_get_errors(self) -> None:
+        mock_context = MagicMock()
+        mock_scope_1 = MagicMock()
+        mock_scope_2 = MagicMock()
+        mock_scope_3 = MagicMock()
+
+        sut = JobScopeStatuses()
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=mock_scope_1))
+        sut.handle(JobStartScopeEvent(mock_context, mock_scope_1, started_scope=mock_scope_2))
+        sut.handle(JobStartScopeEvent(mock_context, mock_scope_2, started_scope=mock_scope_3))
+
+        self.assertEqual([], sut.get_errors(mock_scope_1))
+        self.assertEqual([], sut.get_errors(mock_scope_2))
+        self.assertEqual([], sut.get_errors(mock_scope_3))
+        self.assertEqual([], sut.get_errors(None))
+
+        sut.handle(JobErrorEvent(mock_context, mock_scope_3, "error"))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_1))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_2))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_3))
+        self.assertEqual(["error"], sut.get_errors(None))
+
+        sut.handle(JobFinishScopeEvent(mock_context, mock_scope_2, finished_scope=mock_scope_3))
+
+        sut.handle(JobErrorEvent(mock_context, mock_scope_2, "error2"))
+        self.assertEqual(["error", "error2"], sut.get_errors(mock_scope_1))
+        self.assertEqual(["error", "error2"], sut.get_errors(mock_scope_2))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_3))
+        self.assertEqual(["error", "error2"], sut.get_errors(None))
+
+        sut.handle(JobFinishScopeEvent(mock_context, mock_scope_1, finished_scope=mock_scope_2))
+
+        sut.handle(JobErrorEvent(mock_context, mock_scope_1, "error3"))
+        self.assertEqual(["error", "error2", "error3"], sut.get_errors(mock_scope_1))
+        self.assertEqual(["error", "error2"], sut.get_errors(mock_scope_2))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_3))
+        self.assertEqual(["error", "error2", "error3"], sut.get_errors(None))
+
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=mock_scope_1))
+
+        sut.handle(JobErrorEvent(mock_context, None, "error4"))
+        self.assertEqual(["error", "error2", "error3"], sut.get_errors(mock_scope_1))
+        self.assertEqual(["error", "error2"], sut.get_errors(mock_scope_2))
+        self.assertEqual(["error"], sut.get_errors(mock_scope_3))
+        self.assertEqual(["error", "error2", "error3", "error4"], sut.get_errors(None))
+
+    def test_get_report(self) -> None:
+        mock_context = MagicMock()
+        stub_scope_1 = StubScopeID("scope-1")
+        stub_scope_2 = StubScopeID("scope-2")
+        stub_scope_3 = StubScopeID("scope-3")
+
+        sut = JobScopeStatuses()
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=stub_scope_1))
+        sut.handle(JobStartScopeEvent(mock_context, stub_scope_1, started_scope=stub_scope_2))
+        sut.handle(JobStartScopeEvent(mock_context, stub_scope_2, started_scope=stub_scope_3))
+
+        sut.handle(JobErrorEvent(mock_context, stub_scope_3, "error"))
+
+        sut.handle(JobFinishScopeEvent(mock_context, stub_scope_2, finished_scope=stub_scope_3))
+
+        sut.handle(JobErrorEvent(mock_context, stub_scope_2, "error2"))
+
+        sut.handle(JobFinishScopeEvent(mock_context, stub_scope_1, finished_scope=stub_scope_2))
+
+        sut.handle(JobErrorEvent(mock_context, stub_scope_1, "error3"))
+
+        sut.handle(JobFinishScopeEvent(mock_context, None, finished_scope=stub_scope_1))
+
+        sut.handle(JobErrorEvent(mock_context, None, "error4"))
+
+        self.assertEqual(
+            {
+                stub_scope_1: {
+                    "status": JobScopeStatus.FAILED,
+                    "errors": ["error3"],
+                    "scopes": {
+                        stub_scope_2: {
+                            "status": JobScopeStatus.FAILED,
+                            "errors": ["error2"],
+                            "scopes": {
+                                stub_scope_3: {"status": JobScopeStatus.FAILED, "errors": ["error"], "scopes": {}}
+                            },
+                        }
+                    },
+                }
+            },
+            sut.get_report(),
+        )
+        self.assertEqual(
+            {stub_scope_3: {"status": JobScopeStatus.FAILED, "errors": ["error"], "scopes": {}}},
+            sut.get_report(stub_scope_3),
+        )
+
 
 class StubScopeID(JobScopeIDMixin):
     def __init__(self, id):
@@ -329,10 +423,14 @@ class TestJobContextImpl(TestCase):
 
                 sut.events.error(boz_error)
 
-        self.assertEqual([foo_error, bar_error, baz_error, boz_error, buz_error], sut.get_errors())
-        self.assertEqual([baz_error, boz_error, buz_error], sut.get_errors(stub_scope_1))
+        self.assertEqual([buz_error, baz_error, boz_error, foo_error, bar_error], sut.get_errors())
+        self.assertEqual([buz_error, baz_error, boz_error], sut.get_errors(stub_scope_1))
         self.assertEqual([buz_error], sut.get_errors(stub_scope_2))
 
     def test_values(self) -> None:
         sut = JobContextImpl()
         self.assertIsInstance(sut.values, Values)
+
+    def test_get_report(self) -> None:
+        sut = JobContextImpl()
+        self.assertEqual({}, sut.get_report())
