@@ -107,7 +107,6 @@ class JobContextImpl(JobContext):
         # State that pushes and pops with the scope.
         self._id: JobContextID = create_context_id()
         self._scope_stack: JobScopeStack[JobScope, JobScopeState] = JobScopeStack(default_factory=JobScopeState)
-        self._known_scopes: dict[str, JobScope] = {}
 
         if values is None:
             values = {}
@@ -141,7 +140,6 @@ class JobContextImpl(JobContext):
         :param scope: The scope to push.
         """
         self._scope_stack.push(scope)
-        self._known_scopes[scope.id] = scope
 
     def pop_scope(self) -> JobScope:
         """
@@ -235,10 +233,14 @@ class JobContextImpl(JobContext):
             # Scope ID is the scope itself.
             return scope_id
 
-        if scope_id.id not in self._known_scopes:
-            raise JobException(f"Scope with ID '{scope_id.id}' is not known to this context.")
+        if scope_id in self._scope_stack.all_nodes:
+            return self._scope_stack.all_nodes[scope_id].key  # type: ignore[index]
 
-        return self._known_scopes[scope_id.id]
+        for scope in self._scope_stack.all_nodes:
+            if scope_id.id == scope.id:
+                return scope
+
+        raise JobException(f"Scope with ID '{scope_id.id}' is not known to this context.")
 
     @property
     def events(self) -> JobStatus:
