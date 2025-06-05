@@ -27,6 +27,7 @@ from rkojob.events import (
     JobStartItemEvent,
     JobStartScopeEvent,
 )
+from rkojob.job import JobScopeIDMixin
 
 
 class TestJobScopeStatuses(TestCase):
@@ -96,14 +97,22 @@ class TestJobScopeStatuses(TestCase):
         self.assertEqual(JobScopeStatus.FAILED, sut.get_status(mock_scope_1))
 
 
-class StubScope:
+class StubScopeID(JobScopeIDMixin):
+    def __init__(self, id):
+        self._id = id
+
+    def __repr__(self):
+        return repr(self.id)
+
+
+class StubScope(JobScopeIDMixin):
     def __init__(self, name, type, teardown=None, id=None):
         self.name = name
         self.type = type
         self.teardown = Delegate[[JobContext], None](continue_on_error=True, reverse=True)
         if teardown:
             self.teardown += teardown
-        self.id = id or create_scope_id()
+        self._id = id or create_scope_id()
 
     def __str__(self):
         return f"{self.type} {self.name}"
@@ -151,10 +160,6 @@ class TestJobContextImpl(TestCase):
             self.assertIs(stub_scope_1, sut.scope)
 
     def test_get_scope(self) -> None:
-        class StubScopeID:
-            def __init__(self, id):
-                self.id = id
-
         sut = JobContextImpl()
 
         self.assertIsNone(sut.get_scope())
