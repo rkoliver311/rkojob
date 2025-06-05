@@ -119,6 +119,50 @@ class TestJobScopeStack(TestCase):
         self.assertEqual((scope1, scope2), sut.path_to(scope2))
         self.assertEqual((scope1, scope2, scope3), sut.path_to(scope3))
 
+    def test_children_of(self) -> None:
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        scope4 = StubScope("scope4", "type")
+        scope5 = StubScope("scope5", "type")
+
+        sut.push(scope1, "scope1")
+        sut.push(scope2, "scope2")
+        sut.push(scope3, "scope3")
+        sut.pop()
+        sut.push(scope4, "scope4")
+        sut.pop()
+        sut.pop()
+        sut.push(scope5, "scope5")
+
+        self.assertEqual(["scope2", "scope3", "scope4", "scope5"], [sut[child] for child in sut.children_of(scope1)])
+        self.assertEqual(["scope2", "scope5"], [sut[child] for child in sut.children_of(scope1, depth=1)])
+        self.assertEqual(["scope3", "scope4"], [sut[child] for child in sut.children_of(scope2)])
+        self.assertEqual(["scope3", "scope4"], [sut[child] for child in sut.children_of(scope2, depth=1)])
+        self.assertEqual([], [sut[child] for child in sut.children_of(scope3)])
+        self.assertEqual([], [sut[child] for child in sut.children_of(scope4)])
+        self.assertEqual([], [sut[child] for child in sut.children_of(scope5)])
+
+    def test_all_nodes(self) -> None:
+        sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
+        scope1 = StubScope("scope1", "type")
+        scope2 = StubScope("scope2", "type")
+        scope3 = StubScope("scope3", "type")
+        scope4 = StubScope("scope4", "type")
+        scope5 = StubScope("scope5", "type")
+
+        sut.push(scope1, "scope1")
+        sut.push(scope2, "scope2")
+        sut.push(scope3, "scope3")
+        sut.pop()
+        sut.push(scope4, "scope4")
+        sut.pop()
+        sut.pop()
+        sut.push(scope5, "scope5")
+
+        self.assertEqual([scope1, scope2, scope3, scope4, scope5], [*sut.all_nodes])
+
     def test_push_pop_peek(self) -> None:
         sut: JobScopeStack[JobScopeID, str] = JobScopeStack()
 

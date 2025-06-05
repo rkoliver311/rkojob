@@ -267,6 +267,9 @@ class JobScopeStackNode(Generic[K, V]):
         self.key: K = key
         self.value: V = value
         self.parent: JobScopeStackNode[K, V] | None = parent
+        self.children: list[JobScopeStackNode[K, V]] = []
+        if self.parent:
+            self.parent.children.append(self)
 
 
 class JobScopeStack(Generic[K, V], Mapping[K, V]):
@@ -295,13 +298,16 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
             raise JobException("Scope stack underflow.")
         node: JobScopeStackNode[K, V] = self._node
         self._node = self._node.parent
-        self._nodes.pop(node.key)
         return node.key, node.value
 
     def peek(self) -> tuple[K, V]:
         if self._node is None:
             raise JobException("Scope stack underflow.")
         return self._node.key, self._node.value
+
+    @property
+    def all_nodes(self) -> dict[K, JobScopeStackNode[K, V]]:
+        return self._nodes
 
     def get_scope(self) -> K | None:
         if self._node is None:
@@ -324,6 +330,18 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
             node = node.parent
         return tuple(reversed(path))
 
+    def children_of(self, key: K, depth: int | None = None) -> tuple[K, ...]:
+        children: list[K] = []
+        if depth is None or depth > 0:
+            node: JobScopeStackNode[K, V] | None = self._nodes.get(key)
+            if node:
+                if depth is not None:
+                    depth -= 1
+                for child in node.children:
+                    children.append(child.key)
+                    children.extend(self.children_of(child.key, depth=depth))
+        return tuple(children)
+
     def fork(self) -> JobScopeStack[K, V]:
         fork: JobScopeStack[K, V] = type(self)()
         fork._node = self._node
@@ -340,7 +358,7 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
         return self._nodes[key].value
 
     def __len__(self) -> int:
-        return len(self._nodes)
+        return sum(1 for _ in self)
 
     def __iter__(self) -> Iterator[K]:
         node: JobScopeStackNode[K, V] | None = self._node
