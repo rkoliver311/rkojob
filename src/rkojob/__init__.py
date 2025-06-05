@@ -186,27 +186,13 @@ class JobContext(Protocol):
     def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
     def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]: ...
     def error(self, error: str | Exception) -> Exception: ...
-
-    """
-    Record *error* in the current scope.
-
-    :param error: And exception or error message.
-    :returns: The exception instance or the error message as an exception.
-    """
-
-    def get_errors(self, scope: JobScopeID | None = None) -> list[Exception]: ...
+    def get_errors(self, scope: JobScopeID | None = ...) -> list[Exception]: ...
+    def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]: ...
     @property
     def values(self) -> Values: ...
     @property
     def events(self) -> JobStatus: ...
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
-
-    """
-    Return exceptions recorded for *scope* or for *all* scopes if omitted.
-
-    :param scope: Scope to return exceptions for, or ``None`` to get all exceptions.
-    :returns: List of recorded exceptions.
-    """
 
 
 def create_scope_id() -> str:
