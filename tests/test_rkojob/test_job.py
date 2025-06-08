@@ -17,9 +17,12 @@ from rkojob.factories import JobContextFactory
 from rkojob.job import (
     Job,
     JobBuilder,
+    JobGroup,
+    JobGroupBuilder,
     JobScopeIDMixin,
     JobStage,
     JobStageBuilder,
+    JobStageGroupBuilder,
     JobStep,
     JobStepBuilder,
 )
@@ -130,14 +133,34 @@ class TestJobStep(TestCase):
         self.assertEqual("Step name", str(JobStep("name")))
 
 
+class TestJobGroup(TestCase):
+    def test(self):
+        sut = JobGroup(name="group", scopes=[JobGroup(name="group1"), JobStep(name="step1"), JobStage(name="stage1")])
+        self.assertEqual("group", sut.name)
+        self.assertEqual(3, len(sut.scopes))
+        self.assertEqual("group1", sut.scopes[0].name)
+        self.assertEqual("step1", sut.scopes[1].name)
+        self.assertEqual("stage1", sut.scopes[2].name)
+
+    def test_id(self):
+        self.assertEqual("scope_id", JobGroup("name", id="scope_id").id)
+        self.assertIsNotNone(JobGroup("name", id=None).id)
+
+    def test_concurrent(self):
+        self.assertTrue(JobGroup("name", concurrent=True).concurrent)
+
+    def test_str(self) -> None:
+        self.assertEqual("Group name", str(JobGroup("name")))
+
+
 class TestJobStage(TestCase):
     def test(self):
-        sut = JobStage(name="stage", steps=[JobStep(name="step1"), JobStep(name="step2")])
+        sut = JobStage(name="stage", scopes=[JobGroup(name="group1"), JobStep(name="step1"), JobStep(name="step2")])
         self.assertEqual("stage", sut.name)
-        self.assertIs(sut.scopes, sut.steps)
-        self.assertEqual(2, len(sut.steps))
-        self.assertEqual("step1", sut.steps[0].name)
-        self.assertEqual("step2", sut.steps[1].name)
+        self.assertEqual(3, len(sut.scopes))
+        self.assertEqual("group1", sut.scopes[0].name)
+        self.assertEqual("step1", sut.scopes[1].name)
+        self.assertEqual("step2", sut.scopes[2].name)
 
     def test_id(self):
         self.assertEqual("scope_id", JobStage("name", id="scope_id").id)
@@ -152,18 +175,27 @@ class TestJobStage(TestCase):
 
 class TestJob(TestCase):
     def test(self):
-        sut = Job(name="job", stages=[JobStage(name="stage1"), JobStage(name="stage2")])
+        sut = Job(
+            name="job",
+            scopes=[
+                JobGroup(name="group1"),
+                JobStep(name="job_step"),
+                JobStage(name="stage1"),
+                JobStage(name="stage2"),
+            ],
+        )
         self.assertEqual("job", sut.name)
-        self.assertIs(sut.scopes, sut.stages)
-        self.assertEqual(2, len(sut.stages))
-        self.assertEqual("stage1", sut.stages[0].name)
-        self.assertEqual("stage2", sut.stages[1].name)
+        self.assertEqual(4, len(sut.scopes))
+        self.assertEqual("group1", sut.scopes[0].name)
+        self.assertEqual("job_step", sut.scopes[1].name)
+        self.assertEqual("stage1", sut.scopes[2].name)
+        self.assertEqual("stage2", sut.scopes[3].name)
         self.assertFalse(sut.concurrent)
 
-    def test_no_stages(self):
+    def test_no_scopes(self):
         sut = Job(name="job")
         self.assertEqual("job", sut.name)
-        self.assertEqual([], sut.stages)
+        self.assertEqual([], sut.scopes)
 
     def test_id(self):
         self.assertEqual("scope_id", Job("name", id="scope_id").id)
@@ -181,13 +213,12 @@ class TestJobStepBuilder(TestCase):
         mock_run_if = MagicMock()
         mock_skip_if = MagicMock()
 
-        sut = JobStepBuilder("step")
+        sut = JobStepBuilder("step", concurrent=True)
         sut.action = mock_action
         sut.teardown += mock_teardown1
         sut.teardown += mock_teardown2
         sut.run_if = mock_run_if
         sut.skip_if = mock_skip_if
-        sut.concurrent = True
 
         step = sut.build()
         self.assertEqual("step", step.name)
@@ -212,6 +243,44 @@ class TestJobStepBuilder(TestCase):
         self.assertEqual(str(JobStep("name")), str(JobStepBuilder("name")))
 
 
+class TestJobGroupBuilder(TestCase):
+    def test_concurrent(self) -> None:
+        sut = JobGroupBuilder("group", concurrent=True)
+        self.assertTrue(sut.concurrent)
+
+    def test_group(self) -> None:
+        with JobGroupBuilder("group").group("sub-group") as sub_group:
+            self.assertIsInstance(sub_group, JobGroupBuilder)
+
+    def test_step(self) -> None:
+        with JobGroupBuilder("group").step("step") as step:
+            self.assertIsInstance(step, JobStepBuilder)
+
+    def test_stage(self) -> None:
+        with JobGroupBuilder("group").stage("stage") as stage:
+            self.assertIsInstance(stage, JobStageBuilder)
+
+    def test_str(self) -> None:
+        self.assertEqual(str(JobGroupBuilder("name")), str(JobGroup("name")))
+
+
+class TestJobStageGroupBuilder(TestCase):
+    def test_concurrent(self) -> None:
+        sut = JobStageGroupBuilder("group", concurrent=True)
+        self.assertTrue(sut.concurrent)
+
+    def test_group(self) -> None:
+        with JobStageGroupBuilder("group").group("sub-group") as sub_group:
+            self.assertIsInstance(sub_group, JobStageGroupBuilder)
+
+    def test_step(self) -> None:
+        with JobStageGroupBuilder("group").step("step") as step:
+            self.assertIsInstance(step, JobStepBuilder)
+
+    def test_str(self) -> None:
+        self.assertEqual(str(JobStageGroupBuilder("name")), str(JobGroup("name")))
+
+
 class TestJobStageBuilder(TestCase):
     def test(self):
         mock_action1 = MagicMock()
@@ -219,7 +288,7 @@ class TestJobStageBuilder(TestCase):
         mock_action3 = MagicMock()
         mock_teardown1 = MagicMock()
         mock_teardown2 = MagicMock()
-        sut = JobStageBuilder("stage")
+        sut = JobStageBuilder("stage", concurrent=True)
         with sut.step("step1") as step1:
             step1.action = mock_action1
         with sut.step("step2") as step2:
@@ -228,19 +297,18 @@ class TestJobStageBuilder(TestCase):
             step3.action = mock_action3
         sut.teardown += mock_teardown1
         sut.teardown += mock_teardown2
-        sut.concurrent = True
         stage = sut.build()
         self.assertEqual("stage", stage.name)
         self.assertEqual(sut.id, stage.id)
         self.assertEqual(sut.concurrent, stage.concurrent)
         self.assertIn(mock_teardown1, stage.teardown)
         self.assertIn(mock_teardown2, stage.teardown)
-        self.assertEqual("step1", stage.steps[0].name)
-        self.assertIs(mock_action1, stage.steps[0].action)
-        self.assertEqual("step2", stage.steps[1].name)
-        self.assertIs(mock_action2, stage.steps[1].action)
-        self.assertEqual("step3", stage.steps[2].name)
-        self.assertIs(mock_action3, stage.steps[2].action)
+        self.assertEqual("step1", stage.scopes[0].name)
+        self.assertIs(mock_action1, stage.scopes[0].action)
+        self.assertEqual("step2", stage.scopes[1].name)
+        self.assertIs(mock_action2, stage.scopes[1].action)
+        self.assertEqual("step3", stage.scopes[2].name)
+        self.assertIs(mock_action3, stage.scopes[2].action)
 
     def test_str(self) -> None:
         self.assertEqual(str(JobStage("name")), str(JobStageBuilder("name")))
@@ -248,22 +316,35 @@ class TestJobStageBuilder(TestCase):
 
 class TestJobBuilder(TestCase):
     def test(self):
+        mock_job_action = MagicMock()
         mock_action1_1 = MagicMock()
         mock_action2_1 = MagicMock()
         mock_action3_1 = MagicMock()
+        mock_action3_2 = MagicMock()
+        mock_action3_3 = MagicMock()
         mock_teardown1 = MagicMock()
         mock_teardown2 = MagicMock()
 
         with JobBuilder("job") as sut:
-            with sut.stage("stage1") as stage1:
-                with stage1.step("step1.1") as step1_1:
-                    step1_1.action = mock_action1_1
-            with sut.stage("stage2") as stage2:
-                with stage2.step("step2.1") as step2_1:
-                    step2_1.action = mock_action2_1
+            with sut.step("job_step") as job_step:
+                job_step.action = mock_job_action
+            with sut.group("group1") as group1:
+                with group1.stage("stage1") as stage1:
+                    with stage1.step("step1.1") as step1_1:
+                        step1_1.action = mock_action1_1
+                with group1.stage("stage2") as stage2:
+                    with stage2.step("step2.1") as step2_1:
+                        step2_1.action = mock_action2_1
             with sut.stage("stage3") as stage3:
                 with stage3.step("step3.1") as step3_1:
                     step3_1.action = mock_action3_1
+                with stage3.group("group3") as group3:
+                    with group3.step("step3.2") as step3_2:
+                        step3_2.action = mock_action3_2
+                    with group3.group("group3.1") as group3_1:
+                        with group3_1.step("step3.3") as step3_3:
+                            step3_3.action = mock_action3_3
+
         sut.teardown += mock_teardown1
         sut.teardown += mock_teardown2
 
@@ -273,17 +354,24 @@ class TestJobBuilder(TestCase):
         self.assertIn(mock_teardown1, job.teardown)
         self.assertIn(mock_teardown2, job.teardown)
 
-        self.assertEqual("stage1", job.stages[0].name)
-        self.assertEqual("step1.1", job.stages[0].steps[0].name)
-        self.assertIs(mock_action1_1, job.stages[0].steps[0].action)
+        self.assertEqual("job_step", job.scopes[0].name)
 
-        self.assertEqual("stage2", job.stages[1].name)
-        self.assertEqual("step2.1", job.stages[1].steps[0].name)
-        self.assertIs(mock_action2_1, job.stages[1].steps[0].action)
+        self.assertEqual("group1", job.scopes[1].name)
+        self.assertEqual("stage1", job.scopes[1].scopes[0].name)
+        self.assertIs(mock_action1_1, job.scopes[1].scopes[0].scopes[0].action)
 
-        self.assertEqual("stage3", job.stages[2].name)
-        self.assertEqual("step3.1", job.stages[2].steps[0].name)
-        self.assertIs(mock_action3_1, job.stages[2].steps[0].action)
+        self.assertEqual("stage2", job.scopes[1].scopes[1].name)
+        self.assertIs(mock_action2_1, job.scopes[1].scopes[1].scopes[0].action)
+
+        self.assertEqual("stage3", job.scopes[2].name)
+        self.assertEqual("step3.1", job.scopes[2].scopes[0].name)
+        self.assertIs(mock_action3_1, job.scopes[2].scopes[0].action)
+        self.assertEqual("group3", job.scopes[2].scopes[1].name)
+        self.assertEqual("step3.2", job.scopes[2].scopes[1].scopes[0].name)
+        self.assertIs(mock_action3_2, job.scopes[2].scopes[1].scopes[0].action)
+        self.assertEqual("group3.1", job.scopes[2].scopes[1].scopes[1].name)
+        self.assertEqual("step3.3", job.scopes[2].scopes[1].scopes[1].scopes[0].name)
+        self.assertIs(mock_action3_3, job.scopes[2].scopes[1].scopes[1].scopes[0].action)
 
     def test_negative(self):
         with JobBuilder("job") as sut:
@@ -297,7 +385,7 @@ class TestJobBuilder(TestCase):
                 with stage1.step("step1.2"):
                     pass
         job = sut.build()
-        self.assertEqual("step1.2", job.stages[0].steps[0].name)
+        self.assertEqual("step1.2", job.scopes[0].scopes[0].name)
 
     def test_str(self) -> None:
         self.assertEqual(str(Job("name")), str(JobBuilder("name")))
