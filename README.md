@@ -1,3 +1,5 @@
+from rkojob.concurrent import JobScopeInterrupt
+
 # rkoJob
 
 **rkoJob** is a lightweight framework for defining and running
@@ -144,9 +146,9 @@ Built-in actions include:
   for common CLI tools.
 - You can also define your own custom actions.
 
-If a custom action takes more than just a single `JobContext` argument (or
-no `JobContext` at all), it must be wrapped with `job_action` in order for
-arguments to be resolved from the job context at runtime:
+If a custom action takes more than just a single `JobContext` argument
+(or no `JobContext` at all), it must be wrapped with `job_action` in
+order for arguments to be resolved from the job context at runtime:
 
 ``` python
 with stage.step("step") as step:
@@ -277,6 +279,82 @@ context = job_context
 Deferred values must be resolved at execution time using
 `resolve_value`, `resolve_values`, `resolve_map`, etc. All built-in
 actions automatically resolve these values when they run.
+
+### Concurrent Scopes
+
+> ⚠️ **Note:** Concurrency is a new and evolving feature.
+
+A scope can be marked as `concurrent`, allowing it to run in the
+background while job execution continues.
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage1", concurrent=True) as stage1:
+        with stage1.step("step1") as step1:
+            ...
+        with stage1.step("step2") as step2:
+            ...
+    with job.stage("stage2") as stage2:
+        ...
+```
+
+In this example, `stage1` begins execution in the background, allowing
+the job to proceed immediately to `stage2`. Since `step1` and `step2`
+are not marked as `concurrent`, they will still run sequentially within
+`stage1`.
+
+Now consider this variation:
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage1") as stage1:
+        with stage1.step("step1") as step1:
+            step1.concurrent = True
+            ...
+        with stage1.step("step2") as step2:
+            ...
+    with job.stage("stage2") as stage2:
+        ...
+```
+
+Here, `step1` runs in the background, and job execution proceeds to
+`step2`. However, because `stage1` itself is not marked as `concurrent`,
+the job will wait for `stage1` to complete (including `step1`) before
+moving on to `stage2`.
+
+#### Interrupting Concurrent Scopes
+
+The job runner will emit a `JobInterruptScopeEvent` when a concurrent
+scope should exit.
+
+If a concurrent scope is running an action that *must* finish (e.g. a
+blocking operation), this event can be ignored, as long as the action
+will eventually complete on its own. However, if the action supports
+early interruption, you can use a `JobScopeInterrupt` handler which will
+respond to the event:
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage1") as stage1:
+        with stage1.step("step1") as step1:
+            step1.concurrent = True
+
+            def concurrent_action(context):
+                interrupt = JobScopeInterrupt(context)
+                while not interrupt.is_set():
+                    # Do some work
+                    ...
+
+            step1.action = concurrent_action
+
+        with stage1.step("step2") as step2:
+            ...
+```
+
+In this example, `step1` runs in the background while the job proceeds
+to `step2`. Once `step2` finishes, but before `stage1` begins teardown,
+the runner emits the `JobInterruptScopeEvent`, allowing the concurrent
+step to exit cleanly.
 
 ------------------------------------------------------------------------
 
