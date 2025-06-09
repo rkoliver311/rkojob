@@ -108,14 +108,14 @@ class ForkContextEntry(JobWriterEntry[JobForkContextEvent]):
     is_start = True
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"*Forking context {self.event.context} -> {self.event.forked_context}*")
+        stream.write("*Forking context...*")
 
 
 class JoinContextEntry(JobWriterEntry[JobJoinContextEvent]):
     pair_type = JobStatusWriterPair.CONTEXT
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
-        stream.write(f"*Joining context {self.event.joined_context} -> {self.event.context}*")
+        stream.write("*Joining context...*")
 
 
 class ScopeStartEntry(JobWriterEntry[JobStartScopeEvent]):
@@ -374,8 +374,14 @@ class JobStatusWriter(JobEventHandler):
         append_only: bool = False
 
         if isinstance(event, JobForkContextEvent):
+            # Consider fork/join context "detail"
+            if not self._show_detail:
+                return
             entry = ForkContextEntry(event)
         elif isinstance(event, JobJoinContextEvent):
+            # Consider fork/join context "detail"
+            if not self._show_detail:
+                return
             entry = JoinContextEntry(event)
         elif isinstance(event, JobStartScopeEvent):
             entry = ScopeStartEntry(event)

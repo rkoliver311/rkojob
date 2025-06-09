@@ -329,7 +329,17 @@ class TestJobStatusWriter(TestCase):
 
         sut.handle(JobForkContextEvent(mock_context, None, forked_context=forked_context))
 
-        self.assertEqual(f"*Forking context {mock_context} -> {forked_context}*\n\n", stream.getvalue())
+        self.assertEqual("*Forking context...*\n\n", stream.getvalue())
+
+    def test_fork_context_no_detail(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream, show_detail=False)
+        mock_context = MagicMock()
+        forked_context = MagicMock()
+
+        sut.handle(JobForkContextEvent(mock_context, None, forked_context=forked_context))
+
+        self.assertEqual("", stream.getvalue())
 
     def test_join_context(self) -> None:
         stream: StringIO = StringIO()
@@ -339,7 +349,17 @@ class TestJobStatusWriter(TestCase):
 
         sut.handle(JobJoinContextEvent(mock_context, None, joined_context=joined_context))
 
-        self.assertEqual(f"*Joining context {joined_context} -> {mock_context}*\n\n", stream.getvalue())
+        self.assertEqual("*Joining context...*\n\n", stream.getvalue())
+
+    def test_join_context_no_detail(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream, show_detail=False)
+        mock_context = MagicMock()
+        joined_context = MagicMock()
+
+        sut.handle(JobJoinContextEvent(mock_context, None, joined_context=joined_context))
+
+        self.assertEqual("", stream.getvalue())
 
     def test_start_finish_scope(self) -> None:
         stream: StringIO = StringIO()
