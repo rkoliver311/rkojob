@@ -92,6 +92,12 @@ class JobStatus(JobEventHandler, ABC):
     def skip_scope(self, scope: JobScopeID, reason: str | None = ...) -> None: ...
 
     @abstractmethod
+    def start_scope_teardown(self, scope: JobScopeID | None = ...) -> None: ...
+
+    @abstractmethod
+    def finish_scope_teardown(self, scope: JobScopeID | None = ...) -> None: ...
+
+    @abstractmethod
     def start_section(self, section: str) -> None: ...
 
     @abstractmethod
@@ -128,6 +134,16 @@ class JobStatus(JobEventHandler, ABC):
             raise
         finally:
             self.finish_scope(scope)
+
+    @contextmanager
+    def scope_teardown(self, scope: JobScopeID) -> Generator[None, None, None]:
+        try:
+            self.start_scope_teardown(scope)
+            yield
+        except Exception as e:
+            self.warning(e)
+        finally:
+            self.finish_scope_teardown(scope)
 
     @contextmanager
     def section(self, section: str) -> Generator[None, None, None]:

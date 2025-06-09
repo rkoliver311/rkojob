@@ -16,6 +16,7 @@ from rkojob.events import (
     JobErrorEvent,
     JobFinishItemEvent,
     JobFinishScopeEvent,
+    JobFinishScopeTeardownEvent,
     JobFinishSectionEvent,
     JobForkContextEvent,
     JobInfoEvent,
@@ -24,6 +25,7 @@ from rkojob.events import (
     JobSkipScopeEvent,
     JobStartItemEvent,
     JobStartScopeEvent,
+    JobStartScopeTeardownEvent,
     JobStartSectionEvent,
     JobWarningEvent,
 )
@@ -33,6 +35,7 @@ from rkojob.events import (
 class JobStatusWriterPair(Enum):
     CONTEXT = auto()
     SCOPE = auto()
+    SCOPE_TEARDOWN = auto()
     SECTION = auto()
     ITEM = auto()
 
@@ -176,6 +179,25 @@ class ScopeSkippedEntry(JobWriterEntry[JobSkipScopeEvent]):
         if self.event.reason:
             stream.write(f" ({self.event.reason})")
         stream.write("**")
+
+
+class ScopeTeardownStartEntry(JobWriterEntry[JobStartScopeTeardownEvent]):
+    pair_type = JobStatusWriterPair.SCOPE_TEARDOWN
+    is_start = True
+
+    def _write_indent(self, stream: TextIO, depth: int, prev_event: JobWriterEntry | None = None) -> None:
+        stream.write("#" + "#" * depth + " ")
+
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"Teardown {self.event.scope}")
+
+
+class ScopeTeardownFinishEntry(JobWriterEntry[JobFinishScopeTeardownEvent]):
+    pair_type = JobStatusWriterPair.SCOPE_TEARDOWN
+
+    def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
+        stream.write(f"Finished **Teardown {self.event.scope}**")
+        self._write_duration(stream, duration)
 
 
 class SectionStartEntry(JobWriterEntry[JobStartSectionEvent]):
@@ -365,6 +387,10 @@ class JobStatusWriter(JobEventHandler):
                 entry = ScopeFinishErrorsEntry(event, errors)
             else:
                 entry = ScopeFinishEntry(event)
+        elif isinstance(event, JobStartScopeTeardownEvent):
+            entry = ScopeTeardownStartEntry(event)
+        elif isinstance(event, JobFinishScopeTeardownEvent):
+            entry = ScopeTeardownFinishEntry(event)
         elif isinstance(event, JobErrorEvent):
             entry = ErrorEntry(event)
             if self._depth(ItemFinishEntry) > 0:
@@ -417,8 +443,13 @@ class JobStatusWriter(JobEventHandler):
             start_entry: JobWriterEntry = self._find_start_entry(type(entry))
             duration = datetime.now() - start_entry.event.timestamp
         depth: int
-        if entry.pair_type in (JobStatusWriterPair.SCOPE, JobStatusWriterPair.SECTION):
-            depth = self._depth(ScopeStartEntry) + self._depth(SectionStartEntry)
+        if entry.pair_type in (
+            JobStatusWriterPair.SCOPE,
+            JobStatusWriterPair.SCOPE_TEARDOWN,
+            JobStatusWriterPair.SECTION,
+        ):
+            # These all are "#" prefixed entries
+            depth = self._depth(ScopeStartEntry) + self._depth(ScopeTeardownStartEntry) + self._depth(SectionStartEntry)
         else:
             depth = self._depth(type(entry))
         entry.write_event(self._stream, depth=depth, prev_event=prev_event, duration=duration)
