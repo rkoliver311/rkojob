@@ -14,6 +14,7 @@ from rkojob.events import (
     JobErrorEvent,
     JobFinishItemEvent,
     JobFinishScopeEvent,
+    JobFinishScopeTeardownEvent,
     JobFinishSectionEvent,
     JobForkContextEvent,
     JobInfoEvent,
@@ -22,6 +23,7 @@ from rkojob.events import (
     JobSkipScopeEvent,
     JobStartItemEvent,
     JobStartScopeEvent,
+    JobStartScopeTeardownEvent,
     JobStartSectionEvent,
     JobWarningEvent,
 )
@@ -392,6 +394,24 @@ class TestJobStatusWriter(TestCase):
             JobSkipScopeEvent(MagicMock(), MagicMock(), skipped_scope=StubScope("name", "type"), reason="Disabled")
         )
         self.assertEqual("**Skipping type name (Disabled)**\n\n", stream.getvalue())
+
+    def test_start_finish_teardown(self) -> None:
+        stream: StringIO = StringIO()
+        sut = JobStatusWriter(stream=stream)
+
+        mock_context = MagicMock()
+        stub_scope = StubScope("name", "type")
+
+        sut.handle(JobStartScopeEvent(mock_context, None, started_scope=stub_scope))
+        self.assertEqual("# type name\n\n", stream.getvalue())
+
+        sut.handle(JobStartScopeTeardownEvent(mock_context, stub_scope))
+        self.assertEqual("# type name\n\n## Teardown type name\n\n", stream.getvalue())
+
+        sut.handle(JobFinishScopeTeardownEvent(mock_context, stub_scope))
+        self.assertEqual(
+            "# type name\n\n## Teardown type name\n\nFinished **Teardown type name**\n\n", stream.getvalue()
+        )
 
     def test_start_finish_section(self) -> None:
         stream: StringIO = StringIO()

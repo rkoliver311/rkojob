@@ -14,6 +14,7 @@ from rkojob.events import (
     JobErrorEvent,
     JobFinishItemEvent,
     JobFinishScopeEvent,
+    JobFinishScopeTeardownEvent,
     JobFinishSectionEvent,
     JobForkContextEvent,
     JobInfoEvent,
@@ -24,6 +25,7 @@ from rkojob.events import (
     JobSkipScopeEvent,
     JobStartItemEvent,
     JobStartScopeEvent,
+    JobStartScopeTeardownEvent,
     JobStartSectionEvent,
     JobStatusImpl,
     JobWarningEvent,
@@ -186,6 +188,45 @@ class TestJobStatusImpl(TestCase):
             mock_handler.handle, JobSkipScopeEvent, stub_context, None, skipped_scope=mock_scope, reason="skipped"
         )
 
+    def test_start_scope_teardown(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        sut.start_scope_teardown(mock_scope)
+        self.assertHandledEvent(
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+        )
+        self.assertHandledEvent(mock_handler.handle, JobStartScopeTeardownEvent, stub_context, mock_scope, index=1)
+
+    def test_start_scope_teardown_no_scope(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.start_scope_teardown()
+        self.assertHandledEvent(mock_handler.handle, JobStartScopeTeardownEvent, stub_context, mock_scope)
+
+    def test_finish_scope_teardown(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        sut.start_scope_teardown(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.finish_scope_teardown(mock_scope)
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeTeardownEvent, stub_context, mock_scope)
+
+    def test_finish_scope_teardown_no_scope(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        sut.start_scope_teardown(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.finish_scope_teardown()
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeTeardownEvent, stub_context, mock_scope)
+
     def test_start_section(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
 
@@ -314,6 +355,41 @@ class TestJobStatusImpl(TestCase):
         self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=1)
         self.assertHandledEvent(
             mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=2
+        )
+
+    def test_scope_teardown(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        with sut.scope(mock_scope):
+            with sut.scope_teardown(mock_scope):
+                pass
+
+        self.assertHandledEvent(
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+        )
+        self.assertHandledEvent(mock_handler.handle, JobStartScopeTeardownEvent, stub_context, mock_scope, index=1)
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeTeardownEvent, stub_context, mock_scope, index=2)
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=3
+        )
+
+    def test_scope_teardown_error(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        error = Exception("boom")
+
+        with sut.scope(mock_scope):
+            with sut.scope_teardown(mock_scope):
+                raise error
+
+        self.assertHandledEvent(
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+        )
+        self.assertHandledEvent(mock_handler.handle, JobStartScopeTeardownEvent, stub_context, mock_scope, index=1)
+        self.assertHandledEvent(mock_handler.handle, JobWarningEvent, stub_context, mock_scope, warning=error, index=2)
+        self.assertHandledEvent(mock_handler.handle, JobFinishScopeTeardownEvent, stub_context, mock_scope, index=3)
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=4
         )
 
     def test_section(self) -> None:

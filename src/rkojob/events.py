@@ -51,6 +51,20 @@ class JobStartScopeEvent(JobEvent):
         return cast(JobScopeID, self.data["started_scope"])
 
 
+class JobStartScopeTeardownEvent(JobEvent):
+    type = "start_scope_teardown"
+
+    def __init__(self, context: JobContext, scope: JobScopeID) -> None:
+        super().__init__(context, scope)
+
+
+class JobFinishScopeTeardownEvent(JobEvent):
+    type = "finish_scope_teardown"
+
+    def __init__(self, context: JobContext, scope: JobScopeID) -> None:
+        super().__init__(context, scope)
+
+
 class JobFinishScopeEvent(JobEvent):
     type = "finish_scope"
 
@@ -204,6 +218,16 @@ class JobStatusImpl(JobStatus):
 
     def start_scope(self, scope: JobScopeID) -> None:
         self.handle(JobStartScopeEvent(self._context, self._context.get_scope(), started_scope=scope))
+
+    def start_scope_teardown(self, scope: JobScopeID | None = None) -> None:
+        if scope is None:
+            scope = self._context.scope
+        self.handle(JobStartScopeTeardownEvent(self._context, scope))
+
+    def finish_scope_teardown(self, scope: JobScopeID | None = None) -> None:
+        if scope is None:
+            scope = self._context.scope
+        self.handle(JobFinishScopeTeardownEvent(self._context, scope))
 
     def finish_scope(self, scope: JobScopeID | None = None) -> None:
         if scope is None:

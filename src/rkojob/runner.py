@@ -156,7 +156,7 @@ class JobRunnerImpl:
         all_teardowns += context.get_teardown(teardown)
         all_teardowns += teardown.teardown
         if all_teardowns:
-            with context.events.section(f"Teardown {teardown}"):
+            with context.events.scope_teardown(teardown):
                 results: list[Any] = all_teardowns(context)
                 for result in deep_flatten(results):
                     if isinstance(result, Exception):
