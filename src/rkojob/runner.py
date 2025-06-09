@@ -105,6 +105,8 @@ class JobRunnerImpl:
     def _join_concurrent_scope(self, context: JobContext, future: JobFuture[None]) -> None:
         forked_context: JobContext = future.context
         try:
+            # Request concurrent scopes to stop
+            forked_context.events.interrupt_scope(forked_context.scope)
             future.result()
         except Exception as e:  # pragma: no cover
             forked_context.events.error(e)

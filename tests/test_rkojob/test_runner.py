@@ -2,6 +2,7 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
+import time
 from enum import Enum, auto
 from threading import Event
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from rkojob import (
     JobCallable,
     JobContext,
     JobException,
+    JobIdType,
     ValueKey,
     ValueRef,
     create_scope_id,
@@ -19,10 +21,17 @@ from rkojob import (
     scope_failing,
     scope_succeeding,
 )
+from rkojob.concurrent import JobScopeInterrupt
 from rkojob.delegates import Delegate
 from rkojob.factories import JobContextFactory
+from rkojob.job import JobScopeIDMixin
 from rkojob.runner import JobRunnerImpl
 from rkojob.util import not_none
+
+
+class StubScopeID(JobScopeIDMixin):
+    def __init__(self, id: JobIdType | None = None) -> None:
+        self._id = id or create_scope_id()
 
 
 class StubScope:
@@ -570,3 +579,48 @@ class TestJobRunnerImpl(TestCase):
             sut.run(context, job)
 
         self.assertEqual([], side_effects)
+
+    def test_concurrent_interrupt(self) -> None:
+        side_effects_key = ValueKey[list[str]]("side_effects")
+
+        def background_action(context: JobContext):
+            scope_interrupt: JobScopeInterrupt = JobScopeInterrupt(context)
+
+            for _ in range(10):
+                if scope_interrupt.is_set():
+                    break
+                context.values.get(side_effects_key).append("Hello from the background!")
+                time.sleep(0.1)
+
+        def foreground_action(context: JobContext):
+            context.values.get(side_effects_key).append("Hello from the foreground!")
+
+        job = StubGroupScope(
+            "job",
+            StubScopeType.JOB,
+            scopes=[
+                StubActionScope(
+                    "background_step",
+                    StubScopeType.STEP,
+                    action=background_action,
+                    concurrent=True,
+                    id="background_step",
+                ),
+                StubGroupScope(
+                    "stage",
+                    StubScopeType.STAGE,
+                    scopes=[
+                        StubActionScope("step", StubScopeType.STEP, action=foreground_action),
+                    ],
+                ),
+            ],
+        )
+
+        side_effects: list[str] = []
+
+        context = JobContextFactory.create(values=dict(side_effects=side_effects))
+
+        sut = JobRunnerImpl()
+        sut.run(context, job)
+
+        self.assertEqual(["Hello from the background!", "Hello from the foreground!"], side_effects)

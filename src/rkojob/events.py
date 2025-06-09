@@ -104,6 +104,13 @@ class JobSkipScopeEvent(JobEvent):
         return self.data.get("reason")
 
 
+class JobInterruptScopeEvent(JobEvent):
+    type = "interrupt_scope"
+
+    def __init__(self, context: JobContext, scope: JobScopeID) -> None:
+        super().__init__(context, scope)
+
+
 class JobStartSectionEvent(JobEvent):
     type = "start_section"
 
@@ -210,6 +217,16 @@ class JobStatusImpl(JobStatus):
     def handle(self, event: JobEvent) -> None:
         self._handler.handle(event)
 
+    def add_handler(self, handler: JobEventHandler) -> None:
+        if not isinstance(self._handler, JobEventDispatcher):
+            raise JobException("Wrapped handler is not an event dispatcher.")
+        self._handler.add_handler(handler)
+
+    def remove_handler(self, handler: JobEventHandler) -> None:
+        if not isinstance(self._handler, JobEventDispatcher):
+            raise JobException("Wrapped handler is not an event dispatcher.")
+        self._handler.remove_handler(handler)
+
     def fork_context(self, context: JobContext) -> None:
         self.handle(JobForkContextEvent(self._context, self._context.get_scope(), forked_context=context))
 
@@ -235,6 +252,11 @@ class JobStatusImpl(JobStatus):
         self.handle(
             JobFinishScopeEvent(self._context, self._context.get_scope(scope, generation=1), finished_scope=scope)
         )
+
+    def interrupt_scope(self, scope: JobScopeID | None = None) -> None:
+        if scope is None:
+            scope = self._context.scope
+        self.handle(JobInterruptScopeEvent(self._context, scope))
 
     def skip_scope(self, scope: JobScopeID, reason: str | None = None) -> None:
         self.handle(JobSkipScopeEvent(self._context, self._context.get_scope(), skipped_scope=scope, reason=reason))
