@@ -6,7 +6,13 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
-from rkojob import JobEvent, JobScopeStack, create_context_id, create_scope_id
+from rkojob import (
+    JobEvent,
+    JobException,
+    JobScopeStack,
+    create_context_id,
+    create_scope_id,
+)
 from rkojob.events import (
     JobBufferedEventHandler,
     JobDetailEvent,
@@ -18,6 +24,7 @@ from rkojob.events import (
     JobFinishSectionEvent,
     JobForkContextEvent,
     JobInfoEvent,
+    JobInterruptScopeEvent,
     JobJoinContextEvent,
     JobLocalEventDispatcher,
     JobOutputEvent,
@@ -140,6 +147,29 @@ class TestJobStatusImpl(TestCase):
                 f"Mismatch in event field '{key}': expected {expected_value!r}, got {actual_value!r}.",
             )
 
+    def test_add_remove_handler(self) -> None:
+        dispatcher = JobDirectEventDispatcher()
+        sut = JobStatusImpl(dispatcher, MagicMock())
+        handler = MagicMock()
+
+        sut.add_handler(handler)
+        self.assertTrue(dispatcher._delegate.has_callback(handler.handle))
+
+        sut.remove_handler(handler)
+        self.assertFalse(dispatcher._delegate.has_callback(handler.handle))
+
+    def test_add_remove_handler_negative(self) -> None:
+        handler = JobBufferedEventHandler(MagicMock())
+        sut = JobStatusImpl(handler, MagicMock())
+
+        with self.assertRaises(JobException) as e:
+            sut.add_handler(MagicMock())
+        self.assertEqual("Wrapped handler is not an event dispatcher.", str(e.exception))
+
+        with self.assertRaises(JobException) as e:
+            sut.remove_handler(MagicMock())
+        self.assertEqual("Wrapped handler is not an event dispatcher.", str(e.exception))
+
     def test_fork_context(self) -> None:
         stub_context, _, mock_handler, sut = self._create_sut()
 
@@ -187,6 +217,24 @@ class TestJobStatusImpl(TestCase):
         self.assertHandledEvent(
             mock_handler.handle, JobSkipScopeEvent, stub_context, None, skipped_scope=mock_scope, reason="skipped"
         )
+
+    def test_interrupt_scope(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.interrupt_scope(mock_scope)
+        self.assertHandledEvent(mock_handler.handle, JobInterruptScopeEvent, stub_context, mock_scope)
+
+    def test_interrupt_scope_no_scope(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        sut.start_scope(mock_scope)
+        mock_handler.reset_mock()
+
+        sut.interrupt_scope()
+        self.assertHandledEvent(mock_handler.handle, JobInterruptScopeEvent, stub_context, mock_scope)
 
     def test_start_scope_teardown(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
