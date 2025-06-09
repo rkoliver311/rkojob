@@ -350,3 +350,6 @@ class JobContextImpl(JobContext, JobEventHandler):
     @property
     def values(self) -> Values:
         return self._shared_state.values
+
+    def __str__(self) -> str:
+        return f"context({self.id})"

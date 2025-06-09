@@ -489,3 +489,7 @@ class TestJobContextImpl(TestCase):
             with self.assertRaises(JobException) as e:
                 _ = sut.get_futures(stub_scope)
             self.assertEqual(f"Scope {stub_scope} does not support futures.", str(e.exception))
+
+    def test_str(self) -> None:
+        sut = JobContextImpl()
+        self.assertEqual(f"context({sut.id})", str(sut))
