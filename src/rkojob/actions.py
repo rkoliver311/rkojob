@@ -4,9 +4,10 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 import shlex
+from enum import Enum, auto
 from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from rkojob import (
     JobAction,
@@ -33,15 +34,42 @@ from rkojob.values import (
 )
 
 
+class ShellActionOnError(Enum):
+    ERROR = auto()
+    WARN = auto()
+    RAISE = auto()
+    IGNORE = auto()
+
+
 class ShellAction(JobAction):
+    """
+    A `JobAction` that executes a shell command.
+    """
+
+    ERROR: Final[ShellActionOnError] = ShellActionOnError.ERROR
+    WARN: Final[ShellActionOnError] = ShellActionOnError.WARN
+    RAISE: Final[ShellActionOnError] = ShellActionOnError.RAISE
+    IGNORE: Final[ShellActionOnError] = ShellActionOnError.IGNORE
+
     def __init__(
-        self, *args: Any, result: ValueRef[ShellResult] | None = None, raise_on_error: bool = False, **kwargs
+        self,
+        *args: Any,
+        result: ValueRef[ShellResult] | None = None,
+        on_error: ShellActionOnError | None = None,
+        **kwargs,
     ) -> None:
+        """
+        :param args: Arguments to execute as a shell command.
+        :param result: An optional `ValueRef` to return the `ShellResult` in.
+        :param on_error: On a non-zero return code, whether to raise an error, log an error, log a warning,
+         or do nothing.
+        :param kwargs: Additional keyword args to pass to `Shell()`.
+        """
         super().__init__()
         self._args: tuple[Any, ...] = args
         self._kwargs: dict[str, Any] = kwargs
         self.result: ValueRef[ShellResult] = result or ValueRef(name="result")
-        self._raise_on_error: bool = raise_on_error
+        self._on_error: ShellActionOnError = on_error or ShellActionOnError.ERROR
 
     def action(self, context: JobContext) -> None:
         args: list[Any] = resolve_values(self._args, context=context)
@@ -55,11 +83,15 @@ class ShellAction(JobAction):
                 result = shell(*args)
             except ShellException as e:
                 result = e.result
-                if self._raise_on_error:
-                    raise
-                else:
-                    # Record the error instead of raising it
-                    context.events.error(e)
+                match self._on_error:
+                    case ShellActionOnError.ERROR:
+                        context.events.error(e)
+                    case ShellActionOnError.WARN:
+                        context.events.warning(e)
+                    case ShellActionOnError.RAISE:
+                        raise
+                    case ShellActionOnError.IGNORE:
+                        pass
             finally:
                 if result:
                     assign_value(self.result, result)
