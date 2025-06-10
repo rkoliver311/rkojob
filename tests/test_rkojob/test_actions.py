@@ -62,12 +62,45 @@ class TestShellAction(TestCase):
         context = self.make_context()
         result_ref = ValueRef()
 
-        sut = ShellAction("explode", result=result_ref, raise_on_error=True)
+        sut = ShellAction("explode", result=result_ref, on_error=ShellAction.RAISE)
         with self.assertRaises(ShellException) as e:
             sut.action(context)
         self.assertEqual("boom", str(e.exception))
 
         context.events.error.assert_not_called()
+        context.events.output.assert_called_once_with("boom", label="stderr")
+        self.assertEqual(result, result_ref.value)
+
+    @patch("rkojob.actions.Shell")
+    def test_shell_warn_on_error(self, mock_shell_cls):
+        result = ShellResult(stdout="", stderr="boom", return_code=99)
+        exception = ShellException(result=result)
+        mock_shell_cls.return_value = MagicMock(side_effect=exception)
+
+        context = self.make_context()
+        result_ref = ValueRef()
+
+        sut = ShellAction("explode", result=result_ref, on_error=ShellAction.WARN)
+        sut.action(context)
+
+        context.events.error.assert_not_called()
+        context.events.warning.assert_called_once_with(exception)
+        self.assertEqual(result, result_ref.value)
+
+    @patch("rkojob.actions.Shell")
+    def test_shell_ignore_on_error(self, mock_shell_cls):
+        result = ShellResult(stdout="", stderr="boom", return_code=99)
+        exception = ShellException(result=result)
+        mock_shell_cls.return_value = MagicMock(side_effect=exception)
+
+        context = self.make_context()
+        result_ref = ValueRef()
+
+        sut = ShellAction("explode", result=result_ref, on_error=ShellAction.IGNORE)
+        sut.action(context)
+
+        context.events.error.assert_not_called()
+        context.events.warning.assert_not_called()
         context.events.output.assert_called_once_with("boom", label="stderr")
         self.assertEqual(result, result_ref.value)
 
