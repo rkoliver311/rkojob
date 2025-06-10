@@ -14,6 +14,7 @@ from rkojob import (
     JobContext,
     JobException,
     JobIdType,
+    JobInterrupt,
     ValueKey,
     ValueRef,
     create_scope_id,
@@ -21,7 +22,6 @@ from rkojob import (
     scope_failing,
     scope_succeeding,
 )
-from rkojob.concurrent import JobScopeInterrupt
 from rkojob.delegates import Delegate
 from rkojob.factories import JobContextFactory
 from rkojob.job import JobScopeIDMixin
@@ -584,10 +584,10 @@ class TestJobRunnerImpl(TestCase):
         side_effects_key = ValueKey[list[str]]("side_effects")
 
         def background_action(context: JobContext):
-            scope_interrupt: JobScopeInterrupt = JobScopeInterrupt(context)
+            interrupt: JobInterrupt = not_none(context.get_interrupt())
 
             for _ in range(10):
-                if scope_interrupt.is_set():
+                if interrupt.is_set():
                     break
                 context.values.get(side_effects_key).append("Hello from the background!")
                 time.sleep(0.1)

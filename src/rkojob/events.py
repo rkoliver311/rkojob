@@ -104,13 +104,6 @@ class JobSkipScopeEvent(JobEvent):
         return self.data.get("reason")
 
 
-class JobInterruptScopeEvent(JobEvent):
-    type = "interrupt_scope"
-
-    def __init__(self, context: JobContext, scope: JobScopeID) -> None:
-        super().__init__(context, scope)
-
-
 class JobStartSectionEvent(JobEvent):
     type = "start_section"
 
@@ -252,11 +245,6 @@ class JobStatusImpl(JobStatus):
         self.handle(
             JobFinishScopeEvent(self._context, self._context.get_scope(scope, generation=1), finished_scope=scope)
         )
-
-    def interrupt_scope(self, scope: JobScopeID | None = None) -> None:
-        if scope is None:
-            scope = self._context.scope
-        self.handle(JobInterruptScopeEvent(self._context, scope))
 
     def skip_scope(self, scope: JobScopeID, reason: str | None = None) -> None:
         self.handle(JobSkipScopeEvent(self._context, self._context.get_scope(), skipped_scope=scope, reason=reason))

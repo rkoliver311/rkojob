@@ -324,37 +324,34 @@ moving on to `stage2`.
 
 #### Interrupting Concurrent Scopes
 
-The job runner will emit a `JobInterruptScopeEvent` when a concurrent
-scope should exit.
+Before a concurrent scope starts, a `JobInterrupt` instance is attached
+to the context in which the scope will run. This interrupt is set when
+the concurrent scope should exit.
 
-If a concurrent scope is running an action that *must* finish (e.g. a
-blocking operation), this event can be ignored, as long as the action
-will eventually complete on its own. However, if the action supports
-early interruption, you can use a `JobScopeInterrupt` handler which will
-respond to the event:
+If the action running in the concurrent scope *must* finish (e.g., it's
+performing a blocking operation), the interrupt can be ignored --- as
+long as the action will eventually complete on its own. However, if
+early interruption is supported, the action should monitor the interrupt
+and exit when it is set:
 
 ``` python
 with JobBuilder("job") as job:
     with job.stage("stage1") as stage1:
-        with stage1.step("step1") as step1:
-            step1.concurrent = True
-
+        with stage1.step("step1", concurrent=True) as step1:
             def concurrent_action(context):
-                interrupt = JobScopeInterrupt(context)
+                interrupt = context.get_interrupt()
                 while not interrupt.is_set():
                     # Do some work
                     ...
-
             step1.action = concurrent_action
-
         with stage1.step("step2") as step2:
             ...
 ```
 
-In this example, `step1` runs in the background while the job proceeds
-to `step2`. Once `step2` finishes, but before `stage1` begins teardown,
-the runner emits the `JobInterruptScopeEvent`, allowing the concurrent
-step to exit cleanly.
+In this example, `step1` runs concurrently in the background while the
+job proceeds to `step2`. Once `step2` finishes, but before `stage1`
+begins teardown, the runner sets the context's `JobInterrupt`, allowing
+the concurrent step to exit cleanly.
 
 ------------------------------------------------------------------------
 

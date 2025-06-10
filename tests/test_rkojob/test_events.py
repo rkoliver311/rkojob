@@ -24,7 +24,6 @@ from rkojob.events import (
     JobFinishSectionEvent,
     JobForkContextEvent,
     JobInfoEvent,
-    JobInterruptScopeEvent,
     JobJoinContextEvent,
     JobLocalEventDispatcher,
     JobOutputEvent,
@@ -217,24 +216,6 @@ class TestJobStatusImpl(TestCase):
         self.assertHandledEvent(
             mock_handler.handle, JobSkipScopeEvent, stub_context, None, skipped_scope=mock_scope, reason="skipped"
         )
-
-    def test_interrupt_scope(self) -> None:
-        stub_context, mock_scope, mock_handler, sut = self._create_sut()
-
-        sut.start_scope(mock_scope)
-        mock_handler.reset_mock()
-
-        sut.interrupt_scope(mock_scope)
-        self.assertHandledEvent(mock_handler.handle, JobInterruptScopeEvent, stub_context, mock_scope)
-
-    def test_interrupt_scope_no_scope(self) -> None:
-        stub_context, mock_scope, mock_handler, sut = self._create_sut()
-
-        sut.start_scope(mock_scope)
-        mock_handler.reset_mock()
-
-        sut.interrupt_scope()
-        self.assertHandledEvent(mock_handler.handle, JobInterruptScopeEvent, stub_context, mock_scope)
 
     def test_start_scope_teardown(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()

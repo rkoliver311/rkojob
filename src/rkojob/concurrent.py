@@ -4,11 +4,9 @@ from typing import Callable, Generic, ParamSpec, TypeVar
 
 from rkojob import (
     JobContext,
-    JobEvent,
-    JobEventHandler,
     JobFuture,
     JobFutures,
-    JobScopeID,
+    JobInterrupt,
 )
 
 R = TypeVar("R")
@@ -62,27 +60,22 @@ class JobFuturesImpl(JobFutures):
     def shutdown(self) -> None:
         self._executor.shutdown()
 
+    def create_interrupt(self) -> JobInterrupt:
+        return JobInterruptImpl()
 
-class JobScopeInterrupt(JobEventHandler):
-    def __init__(self, context: JobContext | None, scope: JobScopeID | None = None) -> None:
-        self._scope: JobScopeID | None = scope
+
+class JobInterruptImpl:
+    def __init__(self) -> None:
         self._event: Event = Event()
-
-        if context is not None:
-            context.events.add_handler(self)
-
-    def handle(self, event: JobEvent) -> None:
-        if self._scope is None or self._scope == event.scope:
-            self.set()
-
-    def set(self) -> None:
-        self._event.set()
 
     def is_set(self) -> bool:
         return self._event.is_set()
 
-    def wait(self, timeout: float | None = None) -> bool:
-        return self._event.wait(timeout=timeout)
+    def set(self) -> None:
+        self._event.set()
 
     def clear(self) -> None:
         self._event.clear()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout=timeout)

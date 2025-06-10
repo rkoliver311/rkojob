@@ -2,8 +2,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from rkojob import JobIdType, create_scope_id
-from rkojob.concurrent import JobFutureImpl, JobFuturesImpl, JobScopeInterrupt
-from rkojob.events import JobInterruptScopeEvent
+from rkojob.concurrent import JobFutureImpl, JobFuturesImpl, JobInterruptImpl
 from rkojob.job import JobScopeIDMixin
 
 
@@ -89,32 +88,19 @@ class StubScopeID(JobScopeIDMixin):
         self._id = id or create_scope_id()
 
 
-class TestJobScopeInterrupt(TestCase):
-    def test(self) -> None:
-        scope = StubScopeID("scope-id")
-        sut = JobScopeInterrupt(None, scope)
-        self.assertFalse(sut.is_set())
+class TestJobInterrupt(TestCase):
+    @patch("rkojob.concurrent.Event")
+    def test(self, mock_event_type) -> None:
+        mock_event = mock_event_type()
+        sut = JobInterruptImpl()
+        sut.is_set()
+        mock_event.is_set.assert_called_once_with()
 
-        sut.handle(JobInterruptScopeEvent(MagicMock(), StubScopeID("different-id")))
-        self.assertFalse(sut.is_set())
-
-        sut.handle(JobInterruptScopeEvent(MagicMock(), scope))
-        self.assertTrue(sut.is_set())
-
-        sut.clear()
-        self.assertFalse(sut.is_set())
-
-        sut.handle(JobInterruptScopeEvent(MagicMock(), StubScopeID("scope-id")))
-        self.assertTrue(sut.wait())
-
-    def test_none_scope(self) -> None:
-        sut = JobScopeInterrupt(None)
-        self.assertFalse(sut.is_set())
-
-        sut.handle(JobInterruptScopeEvent(MagicMock(), StubScopeID("different-id")))
-        self.assertTrue(sut.is_set())
+        sut.set()
+        mock_event.set.assert_called_once_with()
 
         sut.clear()
+        mock_event.clear.assert_called_once_with()
 
-        sut.handle(JobInterruptScopeEvent(MagicMock(), StubScopeID("scope-id")))
-        self.assertTrue(sut.is_set())
+        sut.wait(timeout=1.2)
+        mock_event.wait.assert_called_once_with(timeout=1.2)
