@@ -20,6 +20,7 @@ from rkojob import (
     JobFutures,
     JobGroupScope,
     JobIdType,
+    JobInterrupt,
     JobScope,
     JobScopeID,
     JobScopeStack,
@@ -164,17 +165,19 @@ class JobContextImpl(JobContext, JobEventHandler):
         self._id: JobIdType = create_context_id()
         self._local_events: JobEventDispatcher = events or self._shared_state.events
         self._status: JobStatusImpl = JobStatusImpl(self._local_events, self)
+        self._interrupt: JobInterrupt | None = None
 
     @property
     def id(self) -> JobIdType:
         return self._id
 
-    def fork(self) -> JobContextImpl:
+    def fork(self, interrupt: JobInterrupt) -> JobContextImpl:
         # Create a "local" dispatcher that the forked context will send events to.
         local_events: JobLocalEventDispatcher = JobLocalEventDispatcher(self._local_events)
 
         # Pass it into the constructor to override the global dispatcher
         forked: JobContextImpl = type(self)(events=local_events, state=self._shared_state)
+        forked._interrupt = interrupt
 
         # Add forked as a handler of its own events
         local_events.add_handler(forked)
@@ -188,6 +191,9 @@ class JobContextImpl(JobContext, JobEventHandler):
         if isinstance(self._local_events, JobLocalEventDispatcher):
             # Flush our local events to the parent context's events (typically global).
             self._local_events.flush()
+        if self._interrupt:
+            self._interrupt.clear()
+            self._interrupt = None
 
     def handle(self, event: JobEvent):
         if event.context.id == self.id:
@@ -258,6 +264,9 @@ class JobContextImpl(JobContext, JobEventHandler):
         if scope not in self._scope_stack:
             raise JobException(f"Scope {scope} is not an active scope.")
         return self._scope_stack[scope].futures
+
+    def get_interrupt(self) -> JobInterrupt | None:
+        return self._interrupt
 
     def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope | None:
         """

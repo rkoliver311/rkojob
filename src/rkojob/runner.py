@@ -17,6 +17,7 @@ from rkojob import (
     JobFuture,
     JobFutures,
     JobGroupScope,
+    JobInterrupt,
     JobScope,
     JobScopeID,
     JobTeardownScope,
@@ -91,13 +92,15 @@ class JobRunnerImpl:
         if scope.concurrent:
             # The scope will be run concurrently and will be joined
             # during the teardown of the current (i.e. parent) scope.
-            self._fork_concurrent_scope(context, scope)
+            self._run_concurrent_scope(context, scope)
         else:
             self._real_run_scope(context, scope)
 
-    def _fork_concurrent_scope(self, context: JobContext, scope: JobScope) -> None:
+    def _run_concurrent_scope(self, context: JobContext, scope: JobScope) -> None:
         futures: JobFutures = context.get_futures(context.scope)
-        forked_context: JobContext = context.fork()
+
+        interrupt: JobInterrupt = futures.create_interrupt()
+        forked_context: JobContext = context.fork(interrupt=interrupt)
         context.events.fork_context(forked_context)
 
         futures.submit(forked_context, self._real_run_scope, forked_context, scope)
@@ -106,7 +109,9 @@ class JobRunnerImpl:
         forked_context: JobContext = future.context
         try:
             # Request concurrent scopes to stop
-            forked_context.events.interrupt_scope(forked_context.scope)
+            interrupt: JobInterrupt | None = forked_context.get_interrupt()
+            if interrupt:
+                interrupt.set()
             future.result()
         except Exception as e:  # pragma: no cover
             forked_context.events.error(e)

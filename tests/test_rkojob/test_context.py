@@ -447,16 +447,19 @@ class TestJobContextImpl(TestCase):
         sut = JobContextImpl()
         with sut.events.scope(StubScope("scope", "type")):
             handler = StubHandler()
+            mock_interrupt = MagicMock()
             sut._shared_state.events.add_handler(handler)
-            fork = cast(JobContextImpl, sut.fork())
+            fork = cast(JobContextImpl, sut.fork(mock_interrupt))
             self.assertIs(fork._shared_state, sut._shared_state)
             self.assertIsNot(fork._scope_stack, sut._scope_stack)
+            self.assertIs(mock_interrupt, fork.get_interrupt())
 
             fork.events.info("Hello!")
             self.assertEqual([], handler.events)
 
             fork.join()
             self.assertEqual([{"message": "Hello!"}], [event.data for event in handler.events])
+            self.assertIsNone(fork.get_interrupt())
 
     def test_get_futures(self) -> None:
         stub_scope = StubScope("scope", "scope")
