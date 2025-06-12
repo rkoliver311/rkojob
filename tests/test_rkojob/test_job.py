@@ -263,6 +263,16 @@ class TestJobGroupBuilder(TestCase):
     def test_str(self) -> None:
         self.assertEqual(str(JobGroupBuilder("name")), str(JobGroup("name")))
 
+    def test_add_scope(self) -> None:
+        with JobStepBuilder("step1.1") as step_builder:
+            step_builder.action = MagicMock()
+        step = step_builder.build()
+
+        with JobGroupBuilder("stage1") as sut:
+            sut.add_scope(step)
+        stage = sut.build()
+        self.assertIs(step, stage.scopes[0])
+
 
 class TestJobStageGroupBuilder(TestCase):
     def test_concurrent(self) -> None:
@@ -279,6 +289,16 @@ class TestJobStageGroupBuilder(TestCase):
 
     def test_str(self) -> None:
         self.assertEqual(str(JobStageGroupBuilder("name")), str(JobGroup("name")))
+
+    def test_add_scope(self) -> None:
+        with JobStepBuilder("step1.1") as step_builder:
+            step_builder.action = MagicMock()
+        step = step_builder.build()
+
+        with JobStageGroupBuilder("stage1") as sut:
+            sut.add_scope(step)
+        stage = sut.build()
+        self.assertIs(step, stage.scopes[0])
 
 
 class TestJobStageBuilder(TestCase):
@@ -312,6 +332,16 @@ class TestJobStageBuilder(TestCase):
 
     def test_str(self) -> None:
         self.assertEqual(str(JobStage("name")), str(JobStageBuilder("name")))
+
+    def test_add_scope(self) -> None:
+        with JobStepBuilder("step1.1") as step_builder:
+            step_builder.action = MagicMock()
+        step = step_builder.build()
+
+        with JobStageBuilder("stage1") as sut:
+            sut.add_scope(step)
+        stage = sut.build()
+        self.assertIs(step, stage.scopes[0])
 
 
 class TestJobBuilder(TestCase):
@@ -389,3 +419,16 @@ class TestJobBuilder(TestCase):
 
     def test_str(self) -> None:
         self.assertEqual(str(Job("name")), str(JobBuilder("name")))
+
+    def test_add_scope(self) -> None:
+        with JobStageBuilder("stage1") as stage_builder:
+            with stage_builder.step("step1.1") as step:
+                step.action = MagicMock()
+            with stage_builder.step("step1.2") as step:
+                step.action = MagicMock()
+        stage = stage_builder.build()
+
+        with JobBuilder("job") as sut:
+            sut.add_scope(stage)
+        job = sut.build()
+        self.assertIs(stage, job.scopes[0])

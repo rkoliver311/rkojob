@@ -197,7 +197,7 @@ class Job(JobGroup):
         return JobScopes.JOB
 
 
-class JobStepBuilder(JobScopeIDMixin):
+class JobStepBuilder(AbstractContextManager, JobScopeIDMixin):
     def __init__(self, name: str, concurrent: bool = False) -> None:
         self._name: str = name
 
@@ -209,6 +209,9 @@ class JobStepBuilder(JobScopeIDMixin):
         self.run_if: JobConditionalType | None = None
         self.skip_if: JobConditionalType | None = None
         self.concurrent: bool = concurrent
+
+    def __exit__(self, exc_type, exc_value, traceback, /):
+        pass
 
     def build(self) -> JobStep:
         step: JobStep = JobStep(
@@ -226,7 +229,7 @@ class JobStepBuilder(JobScopeIDMixin):
         return f"{self.builds_type} {self._name}"
 
 
-class JobStageGroupBuilder(JobScopeIDMixin):
+class JobStageGroupBuilder(AbstractContextManager, JobScopeIDMixin):
     def __init__(self, name: str, concurrent: bool = False) -> None:
         self._name: str = name
 
@@ -236,18 +239,24 @@ class JobStageGroupBuilder(JobScopeIDMixin):
         self._scopes: list[JobGroup | JobStage | JobStep[Any]] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.concurrent: bool = concurrent
+
+    def __exit__(self, exc_type, exc_value, traceback, /):
+        pass
 
     @contextmanager
     def group(self, name: str, concurrent: bool = False) -> Generator[JobStageGroupBuilder, None, None]:
         builder: JobStageGroupBuilder = JobStageGroupBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def step(self, name: str, concurrent: bool = False) -> Generator[JobStepBuilder, None, None]:
         builder: JobStepBuilder = JobStepBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
+
+    def add_scope(self, scope: JobGroup | JobStage | JobStep[Any]) -> None:
+        self._scopes.append(scope)
 
     def build(self) -> JobGroup:
         group: JobGroup = JobGroup(name=self._name, scopes=self._scopes, concurrent=self.concurrent, id=self._id)
@@ -258,7 +267,7 @@ class JobStageGroupBuilder(JobScopeIDMixin):
         return f"{self.builds_type} {self._name}"
 
 
-class JobGroupBuilder(JobScopeIDMixin):
+class JobGroupBuilder(AbstractContextManager, JobScopeIDMixin):
     def __init__(self, name: str, concurrent: bool = False) -> None:
         self._name: str = name
 
@@ -269,23 +278,29 @@ class JobGroupBuilder(JobScopeIDMixin):
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.concurrent: bool = concurrent
 
+    def __exit__(self, exc_type, exc_value, traceback, /):
+        pass
+
     @contextmanager
     def group(self, name: str, concurrent: bool = False) -> Generator[JobGroupBuilder, None, None]:
         builder: JobGroupBuilder = JobGroupBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def stage(self, name: str, concurrent: bool = False) -> Generator[JobStageBuilder, None, None]:
         builder: JobStageBuilder = JobStageBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def step(self, name: str, concurrent: bool = False) -> Generator[JobStepBuilder, None, None]:
         builder: JobStepBuilder = JobStepBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
+
+    def add_scope(self, scope: JobGroup | JobStage | JobStep[Any]) -> None:
+        self._scopes.append(scope)
 
     def build(self) -> JobGroup:
         group: JobGroup = JobGroup(name=self._name, scopes=self._scopes, concurrent=self.concurrent, id=self._id)
@@ -296,7 +311,7 @@ class JobGroupBuilder(JobScopeIDMixin):
         return f"{self.builds_type} {self._name}"
 
 
-class JobStageBuilder(JobScopeIDMixin):
+class JobStageBuilder(JobScopeIDMixin, AbstractContextManager):
     def __init__(self, name: str, concurrent: bool = False) -> None:
         self._name: str = name
 
@@ -307,17 +322,23 @@ class JobStageBuilder(JobScopeIDMixin):
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
         self.concurrent: bool = concurrent
 
+    def __exit__(self, exc_type, exc_value, traceback, /):
+        pass
+
     @contextmanager
     def group(self, name: str, concurrent: bool = False) -> Generator[JobStageGroupBuilder, None, None]:
         builder: JobStageGroupBuilder = JobStageGroupBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def step(self, name: str, concurrent: bool = False) -> Generator[JobStepBuilder, None, None]:
         builder: JobStepBuilder = JobStepBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
+
+    def add_scope(self, scope: JobGroup | JobStep[Any]) -> None:
+        self._scopes.append(scope)
 
     def build(self) -> JobStage:
         stage: JobStage = JobStage(name=self._name, scopes=self._scopes, concurrent=self.concurrent, id=self._id)
@@ -343,19 +364,22 @@ class JobBuilder(JobScopeIDMixin, AbstractContextManager):
     def group(self, name: str, concurrent: bool = False) -> Generator[JobGroupBuilder, None, None]:
         builder: JobGroupBuilder = JobGroupBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def stage(self, name: str, concurrent: bool = False) -> Generator[JobStageBuilder, None, None]:
         builder: JobStageBuilder = JobStageBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
 
     @contextmanager
     def step(self, name: str, concurrent: bool = False) -> Generator[JobStepBuilder, None, None]:
         builder: JobStepBuilder = JobStepBuilder(name, concurrent=concurrent)
         yield builder
-        self._scopes.append(builder.build())
+        self.add_scope(builder.build())
+
+    def add_scope(self, scope: JobStage | JobGroup | JobStep[Any]) -> None:
+        self._scopes.append(scope)
 
     def build(self) -> Job:
         job: Job = Job(name=self._name, scopes=self._scopes, id=self._id)
