@@ -37,8 +37,8 @@ jobs:
           python_version: "${{ matrix.python-version }}"
           static-analysis:
             verify-test-structure:
-              src_path: ${GITHUB_WORKSPACE}/src
-              tests_path: ${GITHUB_WORKSPACE}/tests
+              source_root: ${GITHUB_WORKSPACE}/src
+              test_root: ${GITHUB_WORKSPACE}/tests
         EOF
     - name: Run Verify Change
       run: |
