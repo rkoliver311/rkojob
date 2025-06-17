@@ -53,9 +53,20 @@ class JobException(Exception):
 
 
 class JobEvent:
-    type: str
+    """
+    A class the represents some event that has occurred. This class can be used
+    directly or sub-typed.
+    """
 
-    def __init__(self, context: JobContext, scope: JobScopeID | None, **data) -> None:
+    def __init__(self, type: str, context: JobContext, scope: JobScopeID | None, **data) -> None:
+        """
+        :param type: A string that identifies the type of event.
+        :param context: The context in which the event occurred.
+        :param scope: The scope in which the event occurred, or `None` if the
+         event is not associated with a scope.
+        :param data: Additional data associated with the event.
+        """
+        self.type: str = type
         self.context: JobContext = context
         self.scope: JobScopeID | None = scope
         self.timestamp: datetime = datetime.now()
@@ -63,73 +74,198 @@ class JobEvent:
 
 
 class JobEventHandler(Protocol):
-    def handle(self, event: JobEvent): ...
+    """
+    A protocol for type that can handle a `JobEvent`.
+    """
+
+    def handle(self, event: JobEvent) -> None:
+        """
+        Handle the provided event. What it means to "handle" is up to the
+        implementation.
+
+        :param event: The `JobEvent` to handle.
+        """
 
 
 @runtime_checkable
 class JobEventDispatcher(JobEventHandler, Protocol):
-    def add_handler(self, handler: JobEventHandler) -> None: ...
-    def remove_handler(self, handler: JobEventHandler) -> None: ...
+    """
+    A `JobEventHandler` that dispatches events to zero or more other handlers.
+    """
+
+    def add_handler(self, handler: JobEventHandler) -> None:
+        """
+        Add a handler as an event destination.
+        :param handler: The handler to add as an event destination.
+        """
+
+    def remove_handler(self, handler: JobEventHandler) -> None:
+        """
+        Remove a handler as an event destination.
+        :param handler: The handler to remove as an event destination.
+        """
 
 
 class JobStatus(JobEventHandler, ABC):
     """
-    Convenience protocol which defines methods for well-known JobEvents
+    Convenience base class which defines methods for well-known `JobEvents`
     """
 
-    def add_handler(self, handler: JobEventHandler) -> None: ...
-    def remove_handler(self, handler: JobEventHandler) -> None: ...
+    def add_handler(self, handler: JobEventHandler) -> None:
+        """
+        For implementations that support dispatch, add a handler as an event
+        destination.
+        :param handler: The handler to add as an event destination.
+        """
+
+    def remove_handler(self, handler: JobEventHandler) -> None:
+        """
+        For implementations that support dispatch, remove a handler as an event
+        destination.
+        :param handler: The handler to remove as an event destination.
+        """
 
     @abstractmethod
-    def fork_context(self, context: JobContext) -> None: ...
+    def fork_context(self, context: JobContext) -> None:
+        """
+        Create and handle an event indicating that a context has been forked.
+        :param context: The new context that was forked off of the "parent"
+         context.
+        """
 
     @abstractmethod
-    def join_context(self, context: JobContext) -> None: ...
+    def join_context(self, context: JobContext) -> None:
+        """
+        Create and handle an event indicating that a forked context has been
+        joined.
+        :param context: The previously forked context that has been joined.
+        """
 
     @abstractmethod
-    def start_scope(self, scope: JobScopeID) -> None: ...
+    def start_scope(self, scope: JobScopeID) -> None:
+        """
+        Create and handle an event indicating that a scope has been started.
+        :param scope: The started scope.
+        """
 
     @abstractmethod
-    def finish_scope(self, scope: JobScopeID | None = ...) -> None: ...
+    def finish_scope(self, scope: JobScopeID | None = ...) -> None:
+        """
+        Create and handle an event indicating that a scope has finished.
+        :param scope: The finished scope. If `None`, the current scope will be
+         assumed.
+        """
 
     @abstractmethod
-    def skip_scope(self, scope: JobScopeID, reason: str | None = ...) -> None: ...
+    def skip_scope(self, scope: JobScopeID, reason: str | None = ...) -> None:
+        """
+        Create and handle an event indicating that a scope has been skipped.
+        :param scope: The scope that has been skipped.
+        :param reason: The optional reason that the scope was skipped.
+        """
 
     @abstractmethod
-    def start_scope_teardown(self, scope: JobScopeID | None = ...) -> None: ...
+    def start_scope_teardown(self, scope: JobScopeID | None = ...) -> None:
+        """
+        Create and handle an event indicating that scope teardown has been
+        started.
+        :param scope: The scope being torn down. If `None`, the current scope
+         will be assumed.
+        """
 
     @abstractmethod
-    def finish_scope_teardown(self, scope: JobScopeID | None = ...) -> None: ...
+    def finish_scope_teardown(self, scope: JobScopeID | None = ...) -> None:
+        """
+        Create and handle an event indicating that scope teardown has finished.
+        :param scope: The scope that has been torn down. If `None`, the
+         current scope will be assumed.
+        """
 
     @abstractmethod
-    def start_section(self, section: str) -> None: ...
+    def start_section(self, section: str) -> None:
+        """
+        Create and handle an event indicating that a section has been started.
+        `JobAction` implementations can use this event to logically organize an
+        action's...actions.
+        :param section: The started section.
+        """
 
     @abstractmethod
-    def finish_section(self, section: str) -> None: ...
+    def finish_section(self, section: str) -> None:
+        """
+        Create and handle an event indicating that a section has been finished.
+        `JobAction` implementations can use this event to logically organize
+        and report on an action's...actions.
+        :param section: The finished section.
+        """
 
     @abstractmethod
-    def start_item(self, description: str) -> None: ...
+    def start_item(self, item: str) -> None:
+        """
+        Create and handle an event indicating that an item has been started.
+        `JobAction` implementations can use this event to logically organize
+        and report on an action's...actions.
+        :param item: The started item.
+        """
 
     @abstractmethod
-    def finish_item(self, outcome: str = ..., error: str | Exception | None = ...) -> None: ...
+    def finish_item(self, outcome: str = ..., error: str | Exception | None = ...) -> None:
+        """
+        Create and handle an event indicating that an item has been finished.
+        `JobAction` implementations can use this event to logically organize
+        and report on an action's...actions.
+        :param outcome: The outcome of the finished item.
+        :param error: Optional error if the item failed.
+        """
 
     @abstractmethod
-    def info(self, info: str) -> None: ...
+    def info(self, message: str) -> None:
+        """
+        Create and handle an event containing an informational message.
+        `JobAction` implementations can use this event to logically organize
+        and report on an action's...actions.
+        :param message: The informational message.
+        """
 
     @abstractmethod
-    def detail(self, detail: str) -> None: ...
+    def detail(self, message: str) -> None:
+        """
+        Create and handle an event containing a detailed message.
+        `JobAction` implementations can use this event to logically organize
+        and report on an action's...actions.
+        :param message: The detailed message.
+        """
 
     @abstractmethod
-    def error(self, error: Exception | str) -> None: ...
+    def error(self, error: Exception | str) -> None:
+        """
+        Create and handle an event indicating that an error has occurred.
+        :param error: The error.
+        """
 
     @abstractmethod
-    def warning(self, warning: Exception | str) -> None: ...
+    def warning(self, warning: Exception | str) -> None:
+        """
+        Create and handle an event indicating that a warning has occurred.
+        :param warning: The warning.
+        """
 
     @abstractmethod
-    def output(self, output: str | Iterable[str], label: str | None = ...) -> None: ...
+    def output(self, output: str | Iterable[str], label: str | None = ...) -> None:
+        """
+        Create and handle an event containing the output of a command.
+        :param output: The output.
+        :param label: Optional label of the output.
+        """
 
     @contextmanager
     def scope(self, scope: JobScopeID) -> Generator[None, None, None]:
+        """
+        A context manager that calls `self.start_scope(scope)` on enter,
+        `self.error(e)` on error, and `self.finish_scope(scope)` on exit.
+
+        :param scope: The scope that will be started and finished.
+        """
         try:
             self.start_scope(scope)
             yield
@@ -141,6 +277,13 @@ class JobStatus(JobEventHandler, ABC):
 
     @contextmanager
     def scope_teardown(self, scope: JobScopeID) -> Generator[None, None, None]:
+        """
+        A context manager that calls `self.start_scope_teardown(scope)` on
+        enter, `self.warning(e)` on error, and
+        `self.finish_scope_teardown(scope)` on exit.
+
+        :param scope: The scope that will be torn down.
+        """
         try:
             self.start_scope_teardown(scope)
             yield
@@ -151,6 +294,12 @@ class JobStatus(JobEventHandler, ABC):
 
     @contextmanager
     def section(self, section: str) -> Generator[None, None, None]:
+        """
+        A context manager that calls `self.start_section(section)` on enter,
+        `self.error(e)` on error, and `self.finish_section(section)` on exit.
+
+        :param section: The section that will be started and finished.
+        """
         try:
             self.start_section(section)
             yield
@@ -162,6 +311,12 @@ class JobStatus(JobEventHandler, ABC):
 
     @contextmanager
     def item(self, item: str) -> Generator[None, None, None]:
+        """
+        A context manager that calls `self.start_item(item)` on enter,
+        `self.error(e)` on error, and `self.finish_item(item)` on exit.
+
+        :param item: The item that will be started and finished.
+        """
         try:
             self.start_item(item)
             yield
@@ -173,12 +328,25 @@ class JobStatus(JobEventHandler, ABC):
 
 
 class JobScopeStatus(Enum):
+    """Enum representing the current status of a scope."""
+
     PASSED = auto()
+    """The scope has completed and was successful."""
+
     FAILED = auto()
+    """The scope has completed and had errors."""
+
     RUNNING = auto()
+    """The scope is currently running and no errors have occurred."""
+
     FAILING = auto()
+    """The scope is currently running and errors have occurred."""
+
     SKIPPED = auto()
+    """The scope was skipped."""
+
     UNKNOWN = auto()
+    """The scope has not run."""
 
 
 R = TypeVar("R")
@@ -250,8 +418,14 @@ class JobContext(Protocol):
     def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]: ...
     @property
     def values(self) -> Values: ...
+
     @property
-    def events(self) -> JobStatus: ...
+    def events(self) -> JobStatus:
+        """
+        :returns: A `JobStatus` implementation that serves as the primary means
+         to generate and handle events from this context and its current scope.
+        """
+
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
     def fork(self, interrupt: JobInterrupt) -> JobContext: ...
     def join(self) -> None: ...
