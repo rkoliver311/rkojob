@@ -5,7 +5,7 @@
 
 # Dog-fooding: verify-change job
 from rkojob import context_value, lazy_action, lazy_format
-from rkojob.actions import VerifyTestStructure, ToolActionBuilder
+from rkojob.actions import ToolActionBuilder, VerifyPythonTestStructure
 from rkojob.job import JobBuilder
 
 tox = ToolActionBuilder("tox")
@@ -20,9 +20,9 @@ with JobBuilder("verify-change") as job:
         # Use explicit name for verify_test_structure so it can be run separately
         with static_analysis.step("verify-test-structure") as verify_test_structure:
             verify_test_structure.action = lazy_action(
-                VerifyTestStructure,
-                src_path=context_value("src_path"),
-                tests_path=context_value("tests_path"),
+                VerifyPythonTestStructure,
+                source_root=context_value("source_root"),
+                test_root=context_value("test_root"),
                 errors=context_value("errors", default=[]),
             )
 

@@ -10,7 +10,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from rkojob import JobContext, JobException, ValueRef, create_scope_id
-from rkojob.actions import ShellAction, ToolActionBuilder, VerifyTestStructure
+from rkojob.actions import ShellAction, ToolActionBuilder, VerifyPythonTestStructure
 from rkojob.factories import JobContextFactory
 from rkojob.util import ShellException, ShellResult
 
@@ -137,7 +137,7 @@ class StubScope:
         self.concurrent = False
 
 
-class TestVerifyTestStructure(TestCase):
+class TestVerifyPythonTestStructure(TestCase):
     def test(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -156,7 +156,7 @@ class TestVerifyTestStructure(TestCase):
             test_foo_bar_path.mkdir(parents=True)
             (test_foo_bar_path / "test_bar.py").touch()
 
-            sut = VerifyTestStructure(src_path=src_path, tests_path=tests_path)
+            sut = VerifyPythonTestStructure(source_root=src_path, test_root=tests_path)
             context = JobContextFactory.create()
             stub_scope = StubScope("scope", "type")
             with context.events.scope(stub_scope):
@@ -166,29 +166,31 @@ class TestVerifyTestStructure(TestCase):
             )
 
     def test_src_not_dir(self) -> None:
-        sut = VerifyTestStructure(src_path=Path() / "foo.bar", tests_path=Path())
+        sut = VerifyPythonTestStructure(source_root=Path() / "foo.bar", test_root=Path())
         with self.assertRaises(JobException) as e:
             sut.action(JobContextFactory.create())
-        self.assertEqual("src_path must be a directory: foo.bar", str(e.exception))
+        self.assertEqual("source_root must be a directory: foo.bar", str(e.exception))
 
     def test_tests_not_dir(self) -> None:
-        sut = VerifyTestStructure(src_path=Path(), tests_path=Path() / "foo.bar")
+        sut = VerifyPythonTestStructure(source_root=Path(), test_root=Path() / "foo.bar")
         with self.assertRaises(JobException) as e:
             sut.action(JobContextFactory.create())
-        self.assertEqual("tests_path must be a directory: foo.bar", str(e.exception))
+        self.assertEqual("test_root must be a directory: foo.bar", str(e.exception))
 
     def test_skip(self) -> None:
-        sut = VerifyTestStructure(src_path=MagicMock(), tests_path=MagicMock())
-        self.assertTrue(sut._skip(Path(".DS_Store")))
-        self.assertTrue(sut._skip(Path(".gitignore")))
-        self.assertTrue(sut._skip(Path("__pycache__")))
-        self.assertTrue(sut._skip(Path() / "Foo.egg-info"))
-        self.assertFalse(sut._skip(Path() / "foo.py"))
+        sut = VerifyPythonTestStructure(source_root=MagicMock(), test_root=MagicMock())
+        cwd = Path()
+        self.assertTrue(sut._skip(cwd, Path(".DS_Store")))
+        self.assertTrue(sut._skip(cwd, Path(".gitignore")))
+        self.assertTrue(sut._skip(cwd, Path("__pycache__")))
+        self.assertTrue(sut._skip(cwd, cwd / "Foo.egg-info"))
+        self.assertTrue(sut._skip(cwd, cwd / "Foo.egg-info" / "foo.py"))
+        self.assertFalse(sut._skip(cwd, cwd / "foo.py"))
 
     def test_expected_test_path(self) -> None:
         src_path = Path("src")
         tests_path = Path("tests")
-        sut = VerifyTestStructure(src_path=src_path, tests_path=tests_path)
+        sut = VerifyPythonTestStructure(source_root=src_path, test_root=tests_path)
 
         self.assertEqual(tests_path / "test_foo.py", sut._expected_test_path(src_path, tests_path, src_path / "foo.py"))
         self.assertEqual(
@@ -201,6 +203,6 @@ class TestVerifyTestStructure(TestCase):
         )
 
     def test_test_name(self) -> None:
-        sut = VerifyTestStructure(src_path=MagicMock(), tests_path=MagicMock())
+        sut = VerifyPythonTestStructure(source_root=MagicMock(), test_root=MagicMock())
         self.assertEqual("test_foo.py", sut._test_name(Path("foo.py")))
         self.assertEqual("test_foo.py", sut._test_name(Path("foo") / "__init__.py"))

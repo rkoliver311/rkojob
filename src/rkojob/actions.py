@@ -2,12 +2,11 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
 import shlex
 from enum import Enum, auto
 from os import PathLike
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Callable, Final
 
 from rkojob import (
     JobAction,
@@ -123,76 +122,107 @@ class ToolActionBuilder:
 
 
 class VerifyTestStructure(JobAction):
+    """
+    Verify that all expected test files exist in their expected locations.
+    """
+
     def __init__(
         self,
         *,
-        src_path: JobResolvableValue[str | PathLike],
-        tests_path: JobResolvableValue[str | PathLike],
+        source_root: JobResolvableValue[str | PathLike],
+        test_root: JobResolvableValue[str | PathLike],
+        source_to_test_func: Callable[[str | PathLike, str | PathLike, str | PathLike], str | PathLike | None],
         errors: ValueRef[list[str]] | None = None,
     ) -> None:
+        """
+        :param source_root: The source root of the project.
+        :param test_root: The test root of the project.
+        :param source_to_test_func: A function that maps a source file path to an expected test file path.
+        :param errors: `ValueRef` in which to return errors.
+        """
         super().__init__()
-        self.src_path: JobResolvableValue[str | PathLike] = src_path or ValueRef(name="src_path")
-        self.tests_path: JobResolvableValue[str | PathLike] = tests_path or ValueRef(name="tests_path")
+        self.source_root: JobResolvableValue[str | PathLike] = source_root or ValueRef(name="source_root")
+        self.test_root: JobResolvableValue[str | PathLike] = test_root or ValueRef(name="test_root")
+        self.source_to_test_func: Callable[[str | PathLike, str | PathLike, str | PathLike], str | PathLike | None] = (
+            source_to_test_func
+        )
         self.errors: ValueRef[list[str]] = as_value_ref(errors, name="errors")
 
     def action(self, context: JobContext) -> None:
-        resolved_value: str | PathLike | None = resolve_value(self.src_path, context=context)
-        src_path: Path | None = as_path(resolved_value)
-        tests_path: Path | None = as_path(resolve_value(self.tests_path, context=context))
+        source_root: Path | None = as_path(resolve_value(self.source_root, context=context))
+        test_root: Path | None = as_path(resolve_value(self.test_root, context=context))
 
-        if src_path is None or not src_path.is_dir():
-            raise JobException(f"src_path must be a directory: {src_path}")
-        if tests_path is None or not tests_path.is_dir():
-            raise JobException(f"tests_path must be a directory: {tests_path}")
+        if source_root is None or not source_root.is_dir():
+            raise JobException(f"source_root must be a directory: {source_root}")
+        if test_root is None or not test_root.is_dir():
+            raise JobException(f"test_root must be a directory: {test_root}")
 
         errors: list[str] = []
-        # Iterate over source path, predict the name of the test file, and assert that it exists
-        self._verify_directory(context, src_path, tests_path, src_path, errors)
-        assign_value(self.errors, errors, context=context)
+        # Iterate over source paths, predict the name of the test file, and assert that it exists
+        for source_path in source_root.glob("**/*"):
+            relative_source_path: str = str(source_path.relative_to(source_root))
 
-    def _verify_directory(
-        self, context: JobContext, src_path: Path, tests_path: Path, source_dir: Path, errors: list[str]
-    ) -> None:
-        child: Path
-        for child in source_dir.iterdir():
-            if self._skip(child):
-                context.events.detail(f"Skipping {child}")
+            test_path: Path | None = as_path(self.source_to_test_func(source_root, test_root, source_path))
+            if test_path is None:
+                context.events.detail(f"Skipping {relative_source_path}")
                 continue
 
-            if child.is_dir():
-                self._verify_directory(context, src_path, tests_path, child, errors)
-            else:
-                expected_test_path: Path | None = self._expected_test_path(src_path, tests_path, child)
-                if expected_test_path is None:  # pragma: no cover
-                    context.events.detail(f"Skipping {child}")
-                    continue
+            context.events.start_item(relative_source_path)
+            relative_test_path: str = str(test_path.relative_to(test_root))
+            error: str | None = None if test_path.exists() else f"missing: {relative_test_path}"
+            context.events.finish_item(relative_test_path, error=error)
 
-                relative_child: str = str(child.relative_to(src_path))
-                context.events.start_item(relative_child)
-                relative_test: str = str(expected_test_path.relative_to(tests_path))
-                error: str | None = None if expected_test_path.exists() else f"missing: {relative_test}"
-                context.events.finish_item(relative_test, error=error)
+            if error:
+                message: str = f"Test path for source path '{relative_source_path}' not found: {relative_test_path}"
+                errors.append(message)
 
-                if error:
-                    message: str = f"Test path for source path '{relative_child}' not found: {relative_test}"
-                    errors.append(message)
+        assign_value(self.errors, errors, context=context)
 
-    def _expected_test_path(self, src_path: Path, tests_path: Path, source_path: Path) -> Path | None:
-        if source_path == src_path:
+
+class VerifyPythonTestStructure(VerifyTestStructure):
+    def __init__(
+        self,
+        *,
+        source_root: JobResolvableValue[str | PathLike],
+        test_root: JobResolvableValue[str | PathLike],
+        errors: ValueRef[list[str]] | None = None,
+    ) -> None:
+        super().__init__(
+            source_root=source_root, test_root=test_root, source_to_test_func=self._expected_test_path, errors=errors
+        )
+
+    def _expected_test_path(
+        self, source_root: str | PathLike, test_root: str | PathLike, source_path: str | PathLike
+    ) -> Path | None:
+        source_root_path: Path = Path(source_root)
+        test_root_path: Path = Path(test_root)
+        source_path_as_path: Path = Path(source_path)
+
+        if source_path_as_path == source_root_path:
             return None
-        test_name: str = self._test_name(source_path)
-        parent_test_path: Path | None = self._expected_test_path(src_path, tests_path, source_path.parent)
+
+        if self._skip(source_root_path, source_path_as_path):
+            return None
+
+        test_name: str = self._test_name(source_path_as_path)
+        parent_test_path: Path | None = self._expected_test_path(source_root, test_root, source_path_as_path.parent)
         if parent_test_path:
             return parent_test_path / test_name
-        return tests_path / test_name
+        return test_root_path / test_name
 
-    def _skip(self, source_path: Path) -> bool:
+    def _skip(self, source_root: Path, source_path: Path) -> bool:
         if source_path.name.startswith("."):
-            return True
-        if source_path.name in ("__pycache__", "__main__.py"):
             return True
         if source_path.name.endswith(".egg-info"):
             return True
+        if source_path.name in ("__pycache__", "__main__.py"):
+            return True
+
+        for parent in source_path.parents:
+            if parent == source_root:
+                break
+            if self._skip(source_root, parent):
+                return True
         return False
 
     def _test_name(self, source_path: Path) -> str:
