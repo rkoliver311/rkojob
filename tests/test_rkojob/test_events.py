@@ -152,10 +152,10 @@ class TestJobStatusImpl(TestCase):
         handler = MagicMock()
 
         sut.add_handler(handler)
-        self.assertTrue(dispatcher._delegate.has_callback(handler.handle))
+        self.assertTrue(dispatcher._handle.has_callback(handler.handle))
 
         sut.remove_handler(handler)
-        self.assertFalse(dispatcher._delegate.has_callback(handler.handle))
+        self.assertFalse(dispatcher._handle.has_callback(handler.handle))
 
     def test_add_remove_handler_negative(self) -> None:
         handler = JobBufferedEventHandler(MagicMock())
