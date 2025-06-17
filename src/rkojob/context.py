@@ -216,7 +216,9 @@ class JobContextImpl(JobContext, JobEventHandler):
 
         :returns: The popped scope
         """
-        scope, _ = self._scope_stack.pop()
+        scope, state = self._scope_stack.pop()
+        # Clean up resources
+        state.futures.shutdown()
         return scope
 
     @property

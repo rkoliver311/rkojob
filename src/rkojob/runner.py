@@ -97,30 +97,47 @@ class JobRunnerImpl:
             self._real_run_scope(context, scope)
 
     def _run_concurrent_scope(self, context: JobContext, scope: JobScope) -> None:
+        # Run a scope (and any child scopes) concurrently within the current scope.
+
+        # Get the JobFutures instance that will manage the concurrent scope.
         futures: JobFutures = context.get_futures(context.scope)
 
+        # Create an interrupt that can be used to interrupt the concurrent scope(s).
         interrupt: JobInterrupt = futures.create_interrupt()
+
+        # Fork the current context, providing sharing the interrupt.
         forked_context: JobContext = context.fork(interrupt=interrupt)
+        # Notify interested parties that a context has been forked.
         context.events.fork_context(forked_context)
 
+        # Submit the scope for concurrent execution.
         futures.submit(forked_context, self._real_run_scope, forked_context, scope)
 
     def _join_concurrent_scope(self, context: JobContext, future: JobFuture[None]) -> None:
+        # Wait for a concurrent scope to complete and join its forked context.
+
+        # Get the forked context from the `JobFuture` used to execute the scope.
         forked_context: JobContext = future.context
+
         try:
-            # Request concurrent scopes to stop
+            # Interrupt the concurrent scope (if possible).
             interrupt: JobInterrupt | None = forked_context.get_interrupt()
             if interrupt:
                 interrupt.set()
+
+            # Wait for the scope to exit.
             future.result()
         except Exception as e:  # pragma: no cover
             forked_context.events.error(e)
             raise
         finally:
+            # Join the forked context
             forked_context.join()
+            # Notify interested parties that a context has been joined.
             context.events.join_context(forked_context)
 
-    def _join_concurrent_scopes(self, context: JobContext, scope: JobScope) -> None:
+    def _join_concurrent_scopes(self, context: JobContext, scope: JobGroupScope) -> None:
+        # Wait for any concurrent child scopes to complete and join their contexts.
         futures: JobFutures = context.get_futures(scope)
         for future in futures.futures:
             self._join_concurrent_scope(context, future)
@@ -140,6 +157,7 @@ class JobRunnerImpl:
                     self._run_action(context, action)
             finally:
                 if group:
+                    # If this is a group scope, wait for any concurrent child scopes.
                     self._join_concurrent_scopes(context, group)
                 if teardown:
                     self._run_teardown(context, teardown)

@@ -354,30 +354,87 @@ P = ParamSpec("P")
 
 
 class JobInterrupt(Protocol):
-    def is_set(self) -> bool: ...
-    def set(self) -> None: ...
-    def clear(self) -> None: ...
-    def wait(self, timeout: float | None = None) -> bool: ...
+    """
+    A protocol that can be used to send an interrupt to a concurrent task.
+    """
+
+    def is_set(self) -> bool:
+        """:returns: Whether this interrupt has been set."""
+
+    def set(self) -> None:
+        """Sets this interrupt."""
+
+    def clear(self) -> None:
+        """Clears this interrupt."""
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """
+        Wait for this interrupt to be set.
+        :param timeout: Optional timeout.
+        :returns: `True` if this interrupt was set. `False` if timeout was
+         exceeded.
+        """
 
 
 class JobFuture(Protocol[R]):
+    """
+    Protocol representing a concurrent task, typically scope.
+    """
+
     @property
-    def context(self) -> JobContext: ...
+    def context(self) -> JobContext:
+        """:returns: The context associated with the concurrent task."""
+
     @property
-    def done(self) -> bool: ...
+    def done(self) -> bool:
+        """:returns: Whether this task is complete."""
+
     @property
-    def running(self) -> bool: ...
-    def result(self, timeout: float | None = ...) -> R: ...
+    def running(self) -> bool:
+        """:returns: Whether this task is still running."""
+
+    def result(self, timeout: float | None = ...) -> R:
+        """
+        Wait for this task to complete and return the result.
+        :param timeout: An optional timeout. If the timeout is exceeded a
+         `TimeoutError` is raised.
+        """
+
     @property
-    def future(self) -> Future[R]: ...
+    def future(self) -> Future[R]:
+        """:returns: The wrapped `concurrent.Future` instance."""
 
 
 class JobFutures(Protocol):
-    def submit(self, context: JobContext, task: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> JobFuture[R]: ...
+    """
+    Protocol providing methods to create and manage `JobFuture` instances.
+    """
+
+    def submit(self, context: JobContext, task: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> JobFuture[R]:
+        """
+        Submits a new task for concurrent execution.
+        :param context: The context associated with the `JobFuture` to be created.
+        :param task: The task to execute concurrently.
+        :param args: Args to pass to the task.
+        :param kwargs: Keyword args to pass to the task.
+        :returns: A `JobFuture` instance.
+        """
+
     @property
-    def futures(self) -> list[JobFuture[Any]]: ...
-    def shutdown(self) -> None: ...
-    def create_interrupt(self) -> JobInterrupt: ...
+    def futures(self) -> list[JobFuture[Any]]:
+        """:returns: A list of `JobFuture` instances submitted using this instance."""
+
+    def shutdown(self) -> None:
+        """
+        Clean-up resources associated with this `JobFutures` instance. No tasks
+        can be submitted after this method is called.
+        """
+
+    def create_interrupt(self) -> JobInterrupt:
+        """
+        :returns: A new `JobInterrupt` instance which can be used to send an
+         interrupt to a `JobFuture`.
+        """
 
 
 JobIdType: TypeAlias = str
@@ -411,8 +468,22 @@ class JobContext(Protocol):
     def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
     def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
     def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]: ...
-    def get_futures(self, scope: JobScopeID) -> JobFutures: ...
-    def get_interrupt(self) -> JobInterrupt | None: ...
+
+    def get_futures(self, scope: JobScopeID) -> JobFutures:
+        """
+        Gets the `JobFutures` instance that can be used to execute concurrent
+        scopes within the provided scope.
+        :param scope: The parent scope that the concurrent scope will be
+         executed within.
+        :returns: A `JobFutures` instance.
+        """
+
+    def get_interrupt(self) -> JobInterrupt | None:
+        """
+        :returns: Optional interrupt that can be used to interrupt concurrent
+         scopes associated with this context.
+        """
+
     def error(self, error: str | Exception) -> Exception: ...
     def get_errors(self, scope: JobScopeID | None = ...) -> list[Exception]: ...
     def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]: ...
@@ -427,8 +498,20 @@ class JobContext(Protocol):
         """
 
     def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
-    def fork(self, interrupt: JobInterrupt) -> JobContext: ...
-    def join(self) -> None: ...
+
+    def fork(self, interrupt: JobInterrupt) -> JobContext:
+        """
+        Create a forked, isolated context from this context.
+        :param interrupt: The `JobInterrupt` instance that can be used to
+         interrupt concurrent scopes that are using forked context.
+        :returns: A context forked from this context.
+        """
+
+    def join(self) -> None:
+        """
+        Join a context that had been previously forked. For example, flush all
+        "local" events that had been generated while the context was forked.
+        """
 
 
 def create_scope_id() -> JobIdType:
@@ -602,14 +685,13 @@ class JobCallable(Protocol[R_co]):
     A callable object that takes a `JobContext` parameter and returns a value.
     """
 
-    def __call__(self, context: JobContext) -> R_co: ...
+    def __call__(self, context: JobContext) -> R_co:
+        """
+        A callable object that takes a `JobContext` parameter.
 
-    """
-    A callable object that takes a `JobContext` parameter.
-
-    :param context: The current job context.
-    :returns: A value of type *R_co*.
-    """
+        :param context: The current job context.
+        :returns: A value of type *R_co*.
+        """
 
 
 # Convenience functions for reading values from provider-like objects.
