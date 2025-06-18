@@ -50,39 +50,71 @@ class JobScopeStatuses(JobEventHandler):
     """
 
     def __init__(self) -> None:
+        # A scope stack to track current scope and associated errors.
         self._scope_stack: JobScopeStack[JobScopeID, list[str | Exception]] = JobScopeStack(default_factory=list)
+        # Dict to track scope status
         self._statuses: dict[JobScopeID, JobScopeStatus] = {}
+        # Errors that occur outside a scope
         self._global_errors: list[str | Exception] = []
 
     def get_status(self, scope: JobScopeID) -> JobScopeStatus:
+        """
+        Get the status of *scope*.
+
+        :param scope: The scope to get the status of.
+        :returns: A ``JobScopeStatus`` value for the scope.
+        """
         return self._statuses.get(scope, JobScopeStatus.UNKNOWN)
 
     def get_errors(self, scope: JobScopeID | None = None) -> list[str | Exception]:
+        """
+        Get the errors recorded for *scope* and all of its child scopes.
+
+        :param scope: The scope to get errors for. If ``None``, return all errors.
+        :returns: A list of errors recorded for the scope.
+        """
         errors: list[str | Exception] = []
         scopes: list[JobScopeID]
         if scope is None:
+            # No scope provided. Collect errors for all scopes.
             scopes = list(self._scope_stack.all_nodes)
         else:
+            # Collect errors for this scope and all child scopes.
             scopes = [scope, *self._scope_stack.children_of(scope)]
 
+        # Add errors for all scopes in reverse order (depth first).
         for key in reversed(scopes):
             errs = self._scope_stack[key]
             errors.extend(errs)
 
         if scope is None:
+            # Include errors that occurred outside a scope.
             errors.extend(self._global_errors)
 
         return errors
 
     def get_report(self, scope: JobScopeID | None = None) -> dict[JobScopeID, Any]:
+        """
+        Generate a report for *scope*, including nested reports for children
+        scopes.
+
+        :param scope: The scope to generate a report for. If ``None``, use the
+         current scope.
+        :returns: A dict including scope status and any recorded errors.
+        """
         if scope is None:
+            # Try the current scope.
             scope = next(iter(self._scope_stack.all_nodes), None)
         if scope is None:
+            # No scope. Return empty report.
             return {}
         return {
             scope: {
+                # The current status of the scope.
                 "status": self.get_status(scope),
+                # Errors recorded during the scope.
                 "errors": self._scope_stack[scope],
+                # Nested reports for child scopes.
                 "scopes": {
                     child: self.get_report(child)[child] for child in self._scope_stack.children_of(scope, depth=1)
                 },
@@ -90,6 +122,7 @@ class JobScopeStatuses(JobEventHandler):
         }
 
     def handle(self, event: JobEvent) -> None:
+        # Listen for events in order to record state and errors.
         if isinstance(event, JobStartScopeEvent):
             self._start_scope(event.started_scope)
         elif isinstance(event, JobFinishScopeEvent):
@@ -112,19 +145,32 @@ class JobScopeStatuses(JobEventHandler):
         self._statuses[scope] = JobScopeStatus.FAILED if self.get_errors(scope) else JobScopeStatus.PASSED
 
     def _skip_scope(self, scope: JobScopeID) -> None:
+        # Scope was skipped
         self._statuses[scope] = JobScopeStatus.SKIPPED
 
     def _error(self, scope: JobScopeID | None, error: Exception | str) -> None:
         if scope is None:
+            # Error occurred outside of scope.
             self._global_errors.append(error)
         else:
+            # Add error to scope's recorded errors.
             self._scope_stack[scope].append(error)
             # If we have a running scope mark it as failing
             self._statuses[scope] = JobScopeStatus.FAILING
 
 
 class JobContextState:
+    """
+    State that is the same for all scopes in a context.
+    """
+
     def __init__(self, events: JobEventDispatcher | None, values: dict[str, Any] | None):
+        """
+        :param events: The ``JobEventDispatcher`` that the context will use to
+         generate and handle events. If ``None``, a new dispatcher will be used.
+        :param values: A dict of context values that will be available via
+         `context.values`.
+        """
         if events is None:
             events = JobDirectEventDispatcher()
         if values is None:
@@ -137,6 +183,10 @@ class JobContextState:
 
 
 class JobScopeState:
+    """
+    State that is specific to a specific scope.
+    """
+
     def __init__(self) -> None:
         # Teardown actions registered ad-hoc
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True, reverse=True)
@@ -145,6 +195,10 @@ class JobScopeState:
 
 
 class JobContextImpl(JobContext, JobEventHandler):
+    """
+    Concrete ``JobContext`` implementation.
+    """
+
     def __init__(
         self,
         *,
@@ -152,19 +206,34 @@ class JobContextImpl(JobContext, JobEventHandler):
         events: JobEventDispatcher | None = None,
         state: JobContextState | None = None,
     ) -> None:
+        """
+        :param values: A dict of context values that will be available via
+         `context.values`. Ignored if *state* is specified.
+        :param events: The ``JobEventDispatcher`` that the context will use to
+         generate and handle events instead of the dispatcher from *state*.
+        :param state: A shared ``JobContextState`` to use for the context's state.
+        """
         # State shared by all contexts (global)
         if state is None:
             state = JobContextState(events=events, values=values)
         self._shared_state: JobContextState = state
+        # Respond to events from the events dispatcher.
         self._shared_state.events.add_handler(self)
 
         # State that pushes and pops with the scope.
         self._scope_stack: JobScopeStack[JobScope, JobScopeState] = JobScopeStack(default_factory=JobScopeState)
 
         # State that extends beyond scope boundaries but is not shared between contexts
+
+        # Unique identifier for the context
         self._id: JobIdType = create_context_id()
+
+        # Dispatcher that scopes executed within this context will use to generate events.
         self._local_events: JobEventDispatcher = events or self._shared_state.events
         self._status: JobStatusImpl = JobStatusImpl(self._local_events, self)
+
+        # The interrupt used to interrupt concurrent actions running within
+        # this context (set if this is a forked context).
         self._interrupt: JobInterrupt | None = None
 
     @property
@@ -192,30 +261,24 @@ class JobContextImpl(JobContext, JobEventHandler):
             # Flush our local events to the parent context's events (typically global).
             self._local_events.flush()
         if self._interrupt:
+            # Discard the interrupt
             self._interrupt.clear()
             self._interrupt = None
 
     def handle(self, event: JobEvent):
         if event.context.id == self.id:
+            # Only handle events generated by this context.
             if isinstance(event, JobStartScopeEvent):
+                # Push the scope on the stack
                 self.push_scope(self._resolve_scope(event.started_scope))
             elif isinstance(event, JobFinishScopeEvent):
+                # Pop the scope off the stack
                 self.pop_scope()
 
     def push_scope(self, scope: JobScope) -> None:
-        """
-        Push *scope* onto the context's scope stack.
-
-        :param scope: The scope to push.
-        """
         self._scope_stack.push(scope)
 
     def pop_scope(self) -> JobScope:
-        """
-        Pop a scope from the context's scope stack and free any associated state.
-
-        :returns: The popped scope
-        """
         scope, state = self._scope_stack.pop()
         # Clean up resources
         state.futures.shutdown()
@@ -223,19 +286,16 @@ class JobContextImpl(JobContext, JobEventHandler):
 
     @property
     def scope(self) -> JobScope:
-        """
-        :returns: The current, innermost, scope.
-        """
+        # Return the current scope off the stack
         return self._scope_stack.peek()[0]
 
     @property
     def scopes(self) -> Tuple[JobScope, ...]:
-        """
-        :returns: The full scope stack from outermost to innermost.
-        """
+        # Return all the scopes on the stack as a tuple
         return self._scope_stack.path_to(self._scope_stack.scope) if self._scope_stack else tuple()
 
     def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
+        # Make sure we have a real scope, not just an ID
         scope = self._resolve_scope(scope)
         if not isinstance(scope, JobTeardownScope):
             raise JobException(f"Scope {scope} does not support teardown.")
@@ -271,26 +331,20 @@ class JobContextImpl(JobContext, JobEventHandler):
         return self._interrupt
 
     def get_scope(self, scope: JobScopeID | None = None, generation: int = 0) -> JobScope | None:
-        """
-        Resolve a scope relative to another, where generation=0 is the same scope,
-        generation=1 is the parent, etc.
-
-        :param scope: Scope to resolve relative to or ``None`` to use the current scope.
-        :param generation: The generation to resolve. A negative value means resolve relative from the root scope
-         with -1 being the root.
-        """
         if generation == 0:
             if scope is None:
+                # Return the current scope
                 return self._scope_stack.get_scope()
+            # Resolve the provided scope then return
             return self._resolve_scope(scope)
 
         scope_index: int
         scopes: list[JobScope] = list(self.scopes)
         if generation < 0:
-            # Get a scope relative to the root
+            # Get a scope relative to the root scope
             scope_index = -1
         else:
-            # Get a scope relative to scope
+            # Get a scope relative to the provided scope
             if scope is None:
                 scope_index = len(scopes) - 1
             else:
@@ -302,26 +356,35 @@ class JobContextImpl(JobContext, JobEventHandler):
 
         scope_index -= generation
         if scope_index < 0:
+            # Provided generation goes beyond the root scope.
+            # This is OK. Return None.
             return None
 
         if scope_index >= len(scopes):
+            # This is not OK.
             raise JobException(
                 f"Unable to get scope relative to {'root' if generation < 0 else scope} using generation={generation}"
             )
+
         return scopes[scope_index]
 
     def _resolve_scope(self, scope_id: JobScopeID) -> JobScope:
+        # Resolve a scope ID into a actual scope
+
         if isinstance(scope_id, JobScope):
             # Scope ID is the scope itself.
             return scope_id
 
+        # If the JobScopeID implementation supports equality by ID, use it
         if scope_id in self._scope_stack.all_nodes:
             return self._scope_stack.all_nodes[scope_id].key  # type: ignore[index]
 
+        # Compare scope_id.id to known scope IDs
         for scope in self._scope_stack.all_nodes:
             if scope_id.id == scope.id:
                 return scope
 
+        # scope_id is unknown
         raise JobException(f"Scope with ID '{scope_id.id}' is not known to this context.")
 
     @property
@@ -335,24 +398,12 @@ class JobContextImpl(JobContext, JobEventHandler):
         return self._shared_state.scope_statuses.get_status(scope)
 
     def error(self, error: str | Exception) -> Exception:
-        """
-        Record *error* in the current scope.
-
-        :param error: And exception or error message.
-        :returns: The exception instance or the error message as an exception.
-        """
         if not isinstance(error, Exception):
             error = JobException(error)
         self.events.error(error)
         return error
 
     def get_errors(self, scope: JobScopeID | None = None) -> list[Exception]:
-        """
-        Return exceptions recorded for *scope* or for *all* scopes if omitted.
-
-        :param scope: Scope to return exceptions for, or ``None`` to get all exceptions.
-        :returns: List of recorded exceptions.
-        """
         return [
             Exception(error) if not isinstance(error, Exception) else error
             for error in self._shared_state.scope_statuses.get_errors(scope)
