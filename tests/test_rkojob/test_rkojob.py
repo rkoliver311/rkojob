@@ -327,6 +327,19 @@ class TestContextValue(TestCase):
             str(e.exception),
         )
 
+    def test_scopes_default(self) -> None:
+        sut: JobResolvableValue[str] = context_value("key", default="default")
+
+        mock_context = MagicMock()
+        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
+        mock_context.values = Values(
+            **{
+                "job.stage.key": "stage_value",
+            }
+        )
+        value = resolve_value(sut, context=mock_context, raise_no_value=True)
+        self.assertEqual("stage_value", value)
+
 
 class TestJobScope(TestCase):
     def test(self) -> None:

@@ -616,7 +616,8 @@ class JobScopeID(Protocol):
     """
 
     @property
-    def id(self) -> JobIdType: ...
+    def id(self) -> JobIdType:
+        """:returns: A unique identifier for the scope."""
 
 
 class JobScopeType(Protocol):
@@ -626,7 +627,8 @@ class JobScopeType(Protocol):
     """
 
     @property
-    def value(self) -> int: ...
+    def value(self) -> int:
+        """:returns: The enum value of the scope type."""
 
 
 @runtime_checkable
@@ -634,11 +636,16 @@ class JobScope(JobScopeID, Protocol):
     """Logical unit of work executed as part of a job."""
 
     @property
-    def type(self) -> JobScopeType: ...
+    def type(self) -> JobScopeType:
+        """:returns: The type of the scope."""
+
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """:returns: The name of the scope."""
+
     @property
-    def concurrent(self) -> bool: ...
+    def concurrent(self) -> bool:
+        """:returns: Whether the scope should be executed concurrently."""
 
 
 @runtime_checkable
@@ -650,7 +657,8 @@ class JobGroupScope(JobScope, Protocol):
     """
 
     @property
-    def scopes(self) -> list[JobScope]: ...
+    def scopes(self) -> list[JobScope]:
+        """:returns: A list of child scopes."""
 
 
 K = TypeVar("K", bound=JobScopeID)
@@ -658,22 +666,35 @@ V = TypeVar("V")
 
 
 class JobScopeStackNode(Generic[K, V]):
+    """
+    Node to store data associated with a scope in a ``JobScopeStack``.
+    """
+
     def __init__(self, key: K, value: V, parent: JobScopeStackNode[K, V] | None) -> None:
         self.key: K = key
         self.value: V = value
         self.parent: JobScopeStackNode[K, V] | None = parent
         self.children: list[JobScopeStackNode[K, V]] = []
         if self.parent:
+            # Add this node to the parent's children
             self.parent.children.append(self)
 
 
 class JobScopeStack(Generic[K, V], Mapping[K, V]):
+    """
+    A stack/dict-like data structure that aids in keeping track of scopes and
+    associated state.
+    """
 
     def __init__(self, default_factory: Callable[[], V] | None = None) -> None:
+        """
+        :param default_factory: Optional factory function used to create a
+         value for a key if it does not exist.
+        """
         self._node: JobScopeStackNode[K, V] | None = None
         self._nodes: dict[K, JobScopeStackNode[K, V]] = {}
         if default_factory is None:
-
+            # Just return None
             def default_factory() -> V:
                 return None  # type: ignore[return-value]
 
@@ -683,49 +704,102 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
         self._forked_node: JobScopeStackNode[K, V] | None = None
 
     def push(self, key: K, value: V | None = None) -> None:
+        """
+        Push a scope, and optional value, onto the stack.
+
+        :param key: The scope to push onto the stack.
+        :param value: Optional value to associate with the scope.
+        """
         if value is None:
+            # Create a default value
             value = self._default_factory()
+
+        # Create a new node with the current node as the parent.
         self._node = JobScopeStackNode(key, value, self._node)
+
+        # Add the node to our list of all known nodes for quick lookup
         self._nodes[key] = self._node
 
     def pop(self) -> tuple[K, V]:
+        """
+        Pop a scope from the stack.
+
+        :returns: A tuple of the scope and its associated value.
+        """
         if self._node is None:
             raise JobException("Scope stack underflow.")
+
+        # Get the current node
         node: JobScopeStackNode[K, V] = self._node
+
+        # Assign the current node to the popped node's parent
         self._node = self._node.parent
+
+        # Return the scope and associated value
         return node.key, node.value
 
     def peek(self) -> tuple[K, V]:
+        """:returns: A tuple of the current scope and associated value."""
         if self._node is None:
             raise JobException("Scope stack underflow.")
         return self._node.key, self._node.value
 
     @property
     def all_nodes(self) -> dict[K, JobScopeStackNode[K, V]]:
+        """:returns: A scope-to-node dictionary of all nodes encountered by this stack."""
         return self._nodes
 
     def get_scope(self) -> K | None:
+        """
+        :returns: The current scope or ``None`` if there is no scope on the
+         stack.
+        """
         if self._node is None:
             return None
         return self._node.key
 
     @property
     def scope(self) -> K:
+        """:returns: The current scope on the stack."""
         return self.peek()[0]
 
     @property
     def value(self) -> V:
+        """
+        :returns: The value associated with the current scope on the stack.
+        """
         return self.peek()[1]
 
     def path_to(self, key: K) -> tuple[K, ...]:
+        """
+        Get a tuple of scopes that is a "path" to the provided scope.
+
+        :param key: The scope to get the path to.
+        :returns: The "path" to the provided scope from outermost to innermost
+         scope.
+        """
         path: list[K] = []
+
+        # Get the node for the provided scope
         node: JobScopeStackNode[K, V] | None = self._nodes.get(key)
+
+        # Walk up from the provided scope up to the root scope
         while node:
             path.append(node.key)
             node = node.parent
+
+        # Reverse the path so that the root is
+        # first and the provided scope is last.
         return tuple(reversed(path))
 
     def children_of(self, key: K, depth: int | None = None) -> tuple[K, ...]:
+        """
+        Get the children of the provided scope
+
+        :param key: The scope to get the children of.
+        :param depth: How deep to go when collecting children.
+        :returns: A tuple of child scopes. Immediate children first.
+        """
         children: list[K] = []
         if depth is None or depth > 0:
             node: JobScopeStackNode[K, V] | None = self._nodes.get(key)
@@ -738,15 +812,22 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
         return tuple(children)
 
     def fork(self) -> JobScopeStack[K, V]:
+        """:returns: A new scope stack forked at the current scope."""
+        # Create a new instance
         fork: JobScopeStack[K, V] = type(self)()
+        # Set the current node
         fork._node = self._node
+        # Make an isolated copy of the node dict
         fork._nodes = copy(self._nodes)
+        # Use the same default factory
         fork._default_factory = self._default_factory
+        # Make a note of the fork location
         fork._forked_node = self._node
         return fork
 
     @property
     def at_fork(self) -> bool:
+        """:returns: Whether the stack is at the node where it was forked."""
         return self._node is self._forked_node
 
     def __getitem__(self, key: K, /) -> V:
@@ -844,21 +925,37 @@ def resolve_value(
     :returns: The value or `default`.
     """
     if isinstance(value, ValueKey):
+        # The value is a key used to resolve a value
+        # from the context's Value's instance.
         if context:
             if raise_no_value or context.values.has_value(value):
+                # Either we want to raise an error instead of returning
+                # the default, or we know we have a value.
                 return context.values.get(value)
             else:
+                # We don't want to raise an error, and we
+                # don't have the value. Return the default.
                 return default
+
+        # No context to resolve value
         if raise_no_value:
             raise NoValueError("Unable to resolve value without context.")
         return default
 
     if isinstance(value, ValueProvider):
+        # The value is a value provider which
+        # may or may not have a value.
         if raise_no_value or value.has_value:
+            # Either we want to raise an error
+            # or we know we have a value.
             return value.get()
+        # We don't want to raise an error, and we
+        # don't have the value. Return the default.
         return default
 
     if isinstance(value, JobCallable):
+        # The value is JobCallable that takes a
+        # JobContext as a arg and returns a value.
         if context:
             return value(context)
         if raise_no_value:
@@ -871,6 +968,14 @@ def resolve_value(
 def resolve_values(
     values: Iterable[JobResolvableValue[Any]], *, context: JobContext | None = None, raise_no_value: bool = True
 ) -> list[Any]:
+    """
+    Resolve an iterable of resolvable values.
+
+    :param values: An iterable of resolvable values.
+    :param context: A context used to resolve values.
+    :param raise_no_value: Whether to raise an error if a value cannot be resolved.
+    :returns: A list of resolved values.
+    """
     return [resolve_value(value, context=context, raise_no_value=raise_no_value) for value in values]
 
 
@@ -880,6 +985,15 @@ def resolve_map(
     raise_no_value: bool = True,
     **kwargs,
 ) -> dict[Any, Any]:
+    """
+    Resolve a map of resolvable values.
+
+    :param values: A map of resolvable values.
+    :param context: A context used to resolve values.
+    :param raise_no_value: Whether to raise an error if a value cannot be resolved.
+    :param kwargs: keyword args to resolve if *values* is not provided.
+    :returns: A list of resolved values.
+    """
     if values is None:
         values = kwargs
     return {key: resolve_value(value, context=context, raise_no_value=raise_no_value) for key, value in values.items()}
@@ -944,10 +1058,16 @@ class context_value(Generic[R_co]):
         self, key: str, coercer: Callable[[Any], R_co] | None = None, default: R_co | NoValueType = NoValue
     ) -> None:
         """
-        Retrieves a value from the context by key.
-        :param key: The key of the value.
-        :param coercer: A conversion function to coerce the value to the required type.
-        :param default: A default value to set and return if no value is associated with the key.
+        Retrieve a value from the context using a key that is resolved relative
+        to the current scope stack. For example, with the key `foo` and the
+        scope stack `job` → `stage` → `step`, the following keys will be tried,
+        in order: `job.stage.step.foo`, `job.stage.foo`, `job.foo`, and `foo`.
+
+        :param key: The name of the value to retrieve.
+        :param coercer: An optional function to convert the raw value to the
+         expected type.
+        :param default: An optional default to use if no value is found; will
+         be set and returned.
         """
         self._key: str = key
         self._coercer: Callable[[Any], R_co] | None = coercer
@@ -955,19 +1075,26 @@ class context_value(Generic[R_co]):
 
     def __call__(self, context: JobContext) -> R_co:
         value: Any = NoValue
+        # Get the names of the current scopes
         scopes: list[str] = [scope.name for scope in context.scopes]
+        # Generate a list of keys that we will try prefixed with the scopes (see docstring)
         keys: list[str] = [f"{'.'.join(scopes[:i])}.{self._key}" for i in range(len(scopes), 0, -1)]
 
+        # Try scope-prefixed keys first
         for key in keys:
             if context.values.has_value(key):
                 value = context.values.get(key)
                 break
 
-        if not context.values.has_value(self._key) and self._default is not NoValue:
-            context.values.set(self._key, self._default)
-            return cast(R_co, self._default)
-
         if value is NoValue:
+            # No value was found using prefixed keys. Try the bare key.
+
+            if not context.values.has_value(self._key) and self._default is not NoValue:
+                # The context does not have the value but a
+                # default was provided. Set it and allow it to
+                # be looked up below.
+                context.values.set(self._key, self._default)
+
             try:
                 value = context.values.get(self._key)
             except NoValueError:
@@ -975,8 +1102,10 @@ class context_value(Generic[R_co]):
                 if keys:
                     message += f" (first tried: {keys})."
                 raise NoValueError(message)
+
         if self._coercer:
             value = self._coercer(value)
+
         return cast(R_co, value)
 
     def __repr__(self) -> str:
