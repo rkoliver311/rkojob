@@ -451,31 +451,86 @@ class JobContext(Protocol):
     """
     Execution context for a running job.
 
-    Implementations maintain a stack of `JobScope` objects, provide
+    Implementations maintain a stack of ``JobScope`` objects, provide
     nested status reporting via `in_scope`, and collect exceptions
     raised during execution.
     """
 
     @property
-    def id(self) -> JobIdType: ...
-    def push_scope(self, scope: JobScope) -> None: ...
-    def pop_scope(self) -> JobScope: ...
+    def id(self) -> JobIdType:
+        """:returns: The unique identifier for this context."""
+
+    def push_scope(self, scope: JobScope) -> None:
+        """
+        Push *scope* onto the context's scope stack.
+
+        :param scope: The scope to push.
+        """
+
+    def pop_scope(self) -> JobScope:
+        """
+        Pop a scope from the context's scope stack and free any associated state.
+
+        :returns: The popped scope
+        """
+
     @property
-    def scope(self) -> JobScope: ...
+    def scope(self) -> JobScope:
+        """
+        :returns: The current, innermost, scope.
+        """
+
     @property
-    def scopes(self) -> Tuple[JobScope, ...]: ...
-    def get_scope(self, scope: JobScopeID | None = ..., generation: int = ...) -> JobScope | None: ...
-    def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
-    def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None: ...
-    def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]: ...
+    def scopes(self) -> Tuple[JobScope, ...]:
+        """
+        :returns: The full scope stack from outermost to innermost.
+        """
+
+    def get_scope(self, scope: JobScopeID | None = ..., generation: int = ...) -> JobScope | None:
+        """
+        Resolve a scope relative to another, where generation=0 is the same scope,
+        generation=1 is the parent, etc.
+
+        :param scope: Scope to resolve relative to or ``None`` to use the current scope.
+        :param generation: The generation to resolve. A negative value means resolve relative from the root scope
+         with -1 being the root.
+        """
+
+    def add_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
+        """
+        Add an action to the *scope*'s teardown. Teardown actions added via
+        this method are executed in reverse order of addition (LIFO) and
+        *before* actions that are statically defined during job definition,
+        which are executed in definition order (FIFO).
+
+        :param scope: The scope to add the teardown action to.
+        :param teardown: The action to execute during the scope's teardown.
+        """
+
+    def remove_teardown(self, scope: JobScopeID, teardown: JobCallable[None]) -> None:
+        """
+        Remove an action from the *scope*'s teardown. Only actions added via
+        `add_teardown()` can be removed.
+
+        :param scope: The scope to remove the teardown action from.
+        :param teardown: The action to remove from the scope's teardown.
+        """
+
+    def get_teardown(self, scope: JobScopeID) -> Delegate[[JobContext], None]:
+        """
+        Get a teardown ``Delegate`` that, when called, will execute the
+        teardown actions added via `add_teardown`.
+
+        :returns: A `Delegate` instance that will invoke the teardown actions.
+        """
 
     def get_futures(self, scope: JobScopeID) -> JobFutures:
         """
-        Gets the `JobFutures` instance that can be used to execute concurrent
+        Gets the ``JobFutures`` instance that can be used to execute concurrent
         scopes within the provided scope.
         :param scope: The parent scope that the concurrent scope will be
          executed within.
-        :returns: A `JobFutures` instance.
+        :returns: A ``JobFutures`` instance.
         """
 
     def get_interrupt(self) -> JobInterrupt | None:
@@ -484,11 +539,38 @@ class JobContext(Protocol):
          scopes associated with this context.
         """
 
-    def error(self, error: str | Exception) -> Exception: ...
-    def get_errors(self, scope: JobScopeID | None = ...) -> list[Exception]: ...
-    def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]: ...
+    def error(self, error: str | Exception) -> Exception:
+        """
+        Record *error* in the current scope. Wrapper for
+        `context.events.error()`.
+
+        :param error: And exception or error message.
+        :returns: The exception instance or the error message as an exception.
+        """
+
+    def get_errors(self, scope: JobScopeID | None = ...) -> list[Exception]:
+        """
+        Return exceptions recorded for *scope* or for *all* scopes if omitted.
+
+        :param scope: Scope to return exceptions for, or ``None`` to get all exceptions.
+        :returns: List of recorded exceptions.
+        """
+
+    def get_report(self, scope: JobScopeID | None = ...) -> dict[JobScopeID, Any]:
+        """
+        Generate a report for *scope*, including child scopes.
+
+        :param scope: The scope to generate a report for. If ``None``, use the
+         current scope.
+        :returns: A dict including scope status and any recorded errors.
+        """
+
     @property
-    def values(self) -> Values: ...
+    def values(self) -> Values:
+        """
+        :returns: A ``Values`` instance containing values associated with this
+         context.
+        """
 
     @property
     def events(self) -> JobStatus:
@@ -497,7 +579,13 @@ class JobContext(Protocol):
          to generate and handle events from this context and its current scope.
         """
 
-    def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus: ...
+    def get_scope_status(self, scope: JobScopeID) -> JobScopeStatus:
+        """
+        Get the current status of a scope.
+
+        :param scope: The scope to get the status for.
+        :returns: A ``JobScopeStatus`` instance.
+        """
 
     def fork(self, interrupt: JobInterrupt) -> JobContext:
         """
