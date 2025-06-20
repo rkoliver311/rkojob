@@ -14,6 +14,7 @@ from rkojob import (
     JobResolvableValue,
     JobScopeID,
     JobScopeStack,
+    JobScopeStatus,
     ValueKey,
     assign_value,
     context_value,
@@ -31,6 +32,8 @@ from rkojob import (
     resolve_value,
     resolve_values,
     scope_failing,
+    scope_ran,
+    scope_status,
     scope_succeeding,
     unassign_value,
 )
@@ -497,6 +500,44 @@ class TestUnassignValue(TestCase):
         with self.assertRaises(JobException) as e:
             unassign_value("foo")  # type: ignore[arg-type]
         self.assertEqual("Unable to unassign foo", str(e.exception))
+
+
+class TestScopeRan(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_context.get_scope_status = MagicMock(return_value=JobScopeStatus.FAILED)
+        self.assertEqual((True, f"{mock_scope} ran."), resolve_value(scope_ran(mock_scope), context=mock_context))
+
+    def test_did_not_run(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_context.get_scope_status = MagicMock(return_value=JobScopeStatus.SKIPPED)
+        self.assertEqual((False, f"{mock_scope} ran."), resolve_value(scope_ran(mock_scope), context=mock_context))
+
+
+class TestScopeStatus(TestCase):
+    def test(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_context.get_scope_status = MagicMock(return_value=JobScopeStatus.FAILED)
+        self.assertEqual(
+            (True, f"{mock_scope} status is one of ['FAILED', 'FAILING']."),
+            resolve_value(
+                scope_status(mock_scope, JobScopeStatus.FAILED, JobScopeStatus.FAILING), context=mock_context
+            ),
+        )
+
+    def test_no_match(self) -> None:
+        mock_context = MagicMock()
+        mock_scope = MagicMock()
+        mock_context.get_scope_status = MagicMock(return_value=JobScopeStatus.SKIPPED)
+        self.assertEqual(
+            (False, f"{mock_scope} status is one of ['FAILED', 'FAILING']."),
+            resolve_value(
+                scope_status(mock_scope, JobScopeStatus.FAILED, JobScopeStatus.FAILING), context=mock_context
+            ),
+        )
 
 
 class TestJobScopeCondition(TestCase):
