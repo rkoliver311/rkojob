@@ -227,6 +227,7 @@ class ToolBuilder:
     def __init__(self, *commands: str, shell: Shell | None = None):
         """
         :param commands: Optional initial command parts.
+        :param kwargs: Optional keyword args to pass to ``Shell()``
         :param shell: Optional `Shell` instance to use instead of default.
         """
         self._commands: list[str] = list(commands)
@@ -286,12 +287,29 @@ class ToolRunner:
         self._kwargs: dict[str, Any] = kwargs
         self._shell: Shell = shell or Shell()
 
+        self._env: dict[str, str] | None = None
+        self._cwd: str | PathLike | None = None
+
     def __call__(self, *args, **kwargs) -> ShellResult:
-        return self._shell(*self.command)
+        if self._env:
+            kwargs.update(env=self._env)
+        if self._cwd:
+            kwargs.update(cwd=self._cwd)
+        return self._shell(*self.command, **kwargs)
 
     @property
     def command(self) -> list[Any]:
         return self._fixup_commands(self._commands) + self._fixup_args(self._args) + self._fixup_kwargs(self._kwargs)
+
+    def with_env(self, **kwargs) -> ToolRunner:
+        if self._env is None:
+            self._env = {}
+        self._env.update(**kwargs)
+        return self
+
+    def in_dir(self, cwd: str | PathLike) -> ToolRunner:
+        self._cwd = cwd
+        return self
 
     @classmethod
     def _fixup_commands(cls, parts: list[str]) -> list[str]:

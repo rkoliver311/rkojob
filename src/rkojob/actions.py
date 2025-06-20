@@ -103,21 +103,44 @@ class ShellAction(JobAction):
 
 
 class ToolActionBuilder:
+    """
+    A command builder class for constructing and later executing CLI tools as a
+    ``ShellAction``. This class is used similarly to ``ToolBuilder`` but rather
+    than executing the command at the end of building, this class returns a
+    ``ShellAction`` to be executed later.
+    """
+
     def __init__(
-        self, *parts: str, runner_type: type[ToolRunner] | None = None, tool_builder: ToolBuilder | None = None
+        self,
+        *parts: str,
+        runner_type: type[ToolRunner] | None = None,
+        tool_builder: ToolBuilder | None = None,
+        **kwargs,
     ) -> None:
+        """
+        :param parts: CLI command and sub-commands to be executed.
+        :param runner_type: The type of ``ToolRunner`` that will be used to
+         prepare, but not execute, the command.
+        :param tool_builder: Used internally for building sub-commands.
+        :param kwargs: Additional keyword arguments to pass to ``ShellAction``.
+        """
         self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts)
         self._runner_type: type[ToolRunner] | None = runner_type
+        self._shell_kwargs: dict[str, Any] = kwargs
+        # Default to not showing any output
+        self._shell_kwargs.setdefault("show_stdout", False)
+        self._shell_kwargs.setdefault("show_stderr", False)
 
     def __getattr__(self, name: str):
-        return ToolActionBuilder(runner_type=self._runner_type, tool_builder=self._tool_builder.__getattr__(name))
+        return ToolActionBuilder(
+            runner_type=self._runner_type, tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs
+        )
 
     def __call__(self, *args, **kwargs) -> ShellAction:
         # Return a ShellAction which will execute the actual command.
         return ShellAction(
             *self._tool_builder.prepare(*args, **kwargs, runner_type=self._runner_type).command,
-            show_stdout=False,
-            show_stderr=False,
+            **self._shell_kwargs,
         )
 
 
