@@ -202,10 +202,33 @@ class TestToolRunner(TestCase):
         sut: ToolRunner = ToolRunner(
             ["command", "sub_command"], "arg1", "--arg2", "value2", arg3="value3", arg_4=1234, shell=mock_shell
         )
-        sut()
+        sut(env={"VAR": "value"})
         mock_shell.assert_called_once_with(
-            "command", "sub-command", "arg1", "--arg2", "value2", "--arg3", "value3", "--arg-4", 1234
+            "command",
+            "sub-command",
+            "arg1",
+            "--arg2",
+            "value2",
+            "--arg3",
+            "value3",
+            "--arg-4",
+            1234,
+            env={"VAR": "value"},
         )
+
+    def test_with_env(self) -> None:
+        mock_shell = MagicMock()
+        sut: ToolRunner = ToolRunner(["command", "sub_command"], "arg", arg2="value", shell=mock_shell)
+        sut.with_env(VAR="value")
+        sut()
+        mock_shell.assert_called_once_with("command", "sub-command", "arg", "--arg2", "value", env={"VAR": "value"})
+
+    def test_in_dir(self) -> None:
+        mock_shell = MagicMock()
+        sut: ToolRunner = ToolRunner(["command", "sub_command"], "arg", arg2="value", shell=mock_shell)
+        sut = sut.in_dir(Path("/some/dir"))
+        sut()
+        mock_shell.assert_called_once_with("command", "sub-command", "arg", "--arg2", "value", cwd=Path("/some/dir"))
 
     def test_fixup_commands(self) -> None:
         self.assertEqual(

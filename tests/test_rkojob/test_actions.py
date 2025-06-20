@@ -124,6 +124,19 @@ class TestToolActionBuilder(TestCase):
         sut = ToolActionBuilder("tool").command.sub_command("-v", enable_feature=True, keyword_arg="value")
         self.assertIsInstance(sut, ShellAction)
         sut.action(MagicMock())
+        mock_shell_type.assert_called_once_with(show_stdout=False, show_stderr=False)
+        mock_shell_type().assert_called_once_with(
+            "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
+        )
+
+    @patch("rkojob.actions.Shell")
+    def test_with_shell_kwargs(self, mock_shell_type) -> None:
+        sut = ToolActionBuilder("tool", show_stdout=True, env={"var": "value"}).command.sub_command(
+            "-v", enable_feature=True, keyword_arg="value"
+        )
+        self.assertIsInstance(sut, ShellAction)
+        sut.action(MagicMock())
+        mock_shell_type.assert_called_once_with(show_stdout=True, env={"var": "value"}, show_stderr=False)
         mock_shell_type().assert_called_once_with(
             "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
         )
