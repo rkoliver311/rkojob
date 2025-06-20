@@ -24,12 +24,10 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r dev-requirements.txt
     - name: Install rkoJob
-      run: pip install -e .
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install .
     - name: Create Job Values YAML
       run: |
         cat <<EOF > verify_change.yaml
