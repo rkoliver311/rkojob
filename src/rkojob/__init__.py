@@ -1222,6 +1222,25 @@ job_succeeding = _JobScopeCondition(lambda context: bool(not context.get_errors(
 """Scope condition that returns ``True`` if *no* errors have been recorded."""
 
 
+def scope_ran(scope: JobScopeID) -> JobCallable[JobConditionalValueType]:
+    """Scope condition that returns ``True`` if a scope has run."""
+    return _JobScopeCondition(
+        lambda context: context.get_scope_status(scope) not in (JobScopeStatus.SKIPPED, JobScopeStatus.UNKNOWN),
+        f"{scope} ran.",
+    )
+
+
+def scope_status(scope: JobScopeID, *statuses: JobScopeStatus) -> JobCallable[JobConditionalValueType]:
+    """
+    Scope condition that returns ``True`` if a scope's status matches one of
+    the provided statuses.
+    """
+    return _JobScopeCondition(
+        lambda context: context.get_scope_status(scope) in statuses,
+        f"{scope} status is one of {[status.name for status in statuses]}.",
+    )
+
+
 def scope_failing(scope: JobScopeID) -> JobCallable[JobConditionalValueType]:
     """Scope condition that returns ``True`` if errors have been recorded for the provided `scope`."""
     return _JobScopeCondition(lambda context: bool(context.get_errors(scope)), f"{scope} has failures.")
