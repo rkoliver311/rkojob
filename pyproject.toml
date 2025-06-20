@@ -12,15 +12,21 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+dependencies = [
+    "PyYAML",
+]
 
 # CLI entry point
 [project.scripts]
 rkojob = "rkojob.cli:main"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.tox]
-legacy_tox_ini = true
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
