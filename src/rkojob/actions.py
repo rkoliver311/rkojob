@@ -190,10 +190,10 @@ class VerifyTestStructure(JobAction):
                 context.events.detail(f"Skipping {relative_source_path}")
                 continue
 
-            context.events.start_item(relative_source_path)
             relative_test_path: str = str(test_path.relative_to(test_root))
-            error: str | None = None if test_path.exists() else f"missing: {relative_test_path}"
-            context.events.finish_item(relative_test_path, error=error)
+            context.events.start_item(f"{relative_source_path} -> {relative_test_path}")
+            error: str | None = "\u274c" if not test_path.exists() else None
+            context.events.finish_item("\u2705", error=error)
 
             if error:
                 message: str = f"Test path for source path '{relative_source_path}' not found: {relative_test_path}"
