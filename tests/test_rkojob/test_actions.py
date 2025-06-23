@@ -38,6 +38,26 @@ class TestShellAction(TestCase):
         self.assertEqual(shell_result, sut.result.get())
 
     @patch("rkojob.actions.Shell")
+    def test_with_env(self, mock_shell_cls):
+        context = self.make_context()
+
+        sut = ShellAction("echo", "ok")
+        sut.with_env(VAR="value")
+        sut.action(context)
+        mock_shell_cls.assert_called_once_with(env={"VAR": "value"})
+        mock_shell_cls().assert_called_once_with("echo", "ok")
+
+    @patch("rkojob.actions.Shell")
+    def test_in_dir(self, mock_shell_cls):
+        context = self.make_context()
+
+        sut = ShellAction("echo", "ok")
+        sut.in_dir("/some/path")
+        sut.action(context)
+        mock_shell_cls.assert_called_once_with(cwd="/some/path")
+        mock_shell_cls().assert_called_once_with("echo", "ok")
+
+    @patch("rkojob.actions.Shell")
     def test_shell_exception(self, mock_shell_cls):
         result = ShellResult(stdout="", stderr="boom", return_code=99)
         exception = ShellException(result=result)

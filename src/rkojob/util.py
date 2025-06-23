@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 from os import PathLike
-from typing import IO, Any, Iterable, TypeVar
+from typing import IO, Any, Iterable, Type, TypeVar
 
 
 class ShellResult:
@@ -224,14 +224,18 @@ class ToolBuilder:
 
     """
 
-    def __init__(self, *commands: str, shell: Shell | None = None):
+    def __init__(self, *commands: str, default_runner_type: Type[ToolRunner] | None = None, shell: Shell | None = None):
         """
         :param commands: Optional initial command parts.
-        :param kwargs: Optional keyword args to pass to ``Shell()``
+        :param default_runner_type: Optional default `ToolRunner` type used to
+         prepare and execute the tool.
         :param shell: Optional `Shell` instance to use instead of default.
         """
         self._commands: list[str] = list(commands)
         self._shell: Shell | None = shell
+
+        self._builder_type: Type[ToolBuilder] = type(self)
+        self._runner_type: Type[ToolRunner] = default_runner_type or ToolRunner
 
     def prepare(self, *args, runner_type: type[ToolRunner] | None = None, **kwargs) -> ToolRunner:
         """
@@ -241,11 +245,12 @@ class ToolBuilder:
         :param kwargs: Additional kwargs to be passed into the command.
         """
         if runner_type is None:
-            runner_type = ToolRunner
+            runner_type = self._runner_type
+
         return runner_type(self._commands, *args, **kwargs, shell=self._shell)
 
     def __getattr__(self, name: str):
-        return ToolBuilder(*self._commands, name, shell=self._shell)
+        return self._builder_type(*self._commands, name, shell=self._shell)
 
     def __call__(self, *args: Any, **kwargs) -> ShellResult:
         runner: ToolRunner = self.prepare(*args, **kwargs)

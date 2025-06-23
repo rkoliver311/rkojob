@@ -195,6 +195,19 @@ class TestToolBuilder(TestCase):
             "command", "sub-command", "arg1", "--arg2", "value2", "--arg3", "value3", "--arg-4", 1234
         )
 
+    def test_sub_class(self) -> None:
+        class SubClassRunner(ToolRunner):
+            pass
+
+        class SubClassBuilder(ToolBuilder):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, default_runner_type=SubClassRunner, **kwargs)
+
+        sut = SubClassBuilder("tool").sub_command
+        self.assertIsInstance(sut, SubClassBuilder)
+        runner = sut.prepare(arg="value")
+        self.assertIsInstance(runner, SubClassRunner)
+
 
 class TestToolRunner(TestCase):
     def test_call(self) -> None:
