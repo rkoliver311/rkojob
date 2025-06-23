@@ -2,6 +2,8 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
+from __future__ import annotations
+
 import shlex
 from enum import Enum, auto
 from os import PathLike
@@ -100,6 +102,28 @@ class ShellAction(JobAction):
                         context.events.output(result.stderr, label="stderr")
                 else:
                     unassign_value(self.result)
+
+    def with_env(self, **kwargs) -> ShellAction:
+        """
+        Update default environment variables set when executing the shell command.
+
+        :param kwargs: Additional environment variables to set.
+        :returns: This instance for call chaining.
+        """
+        env: dict[str, Any] = self._kwargs.get("env", {})
+        env.update(**kwargs)
+        self._kwargs["env"] = env
+        return self
+
+    def in_dir(self, cwd: str | PathLike) -> ShellAction:
+        """
+        Set the current working directory that the shell command will be executed in.
+
+        :param cwd: The directory to execute the shell command.
+        :returns: This instance for call chaining.
+        """
+        self._kwargs["cwd"] = cwd
+        return self
 
 
 class ToolActionBuilder:

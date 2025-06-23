@@ -223,8 +223,11 @@ Built-in condition helpers:
 - `job_never`: Always returns `False`
 - `job_failing`: Returns `True` if the job has any recorded errors
 - `job_succeeding`: Returns `True` if the job has no errors
+- `scope_ran(scope)`: True if the given scope has run
 - `scope_failing(scope)`: True if the given scope has any errors
 - `scope_succeeding(scope)`: True if the given scope has no errors
+- `scope_status(scope, status...)`: True if the given scope status
+  matches one of the provided statuses
 
 **Example:**
 
