@@ -21,18 +21,17 @@ with JobBuilder("verify-change") as job:
                 to_be_deleted: list[Path] = [Path(path) for path in (".tox", "build", "dist")]
                 to_be_deleted.extend(Path().glob("**/*.egg-info"))
                 for to_delete in to_be_deleted:
-                    context.events.start_item(f"Deleting {to_delete}")
-                    if to_delete.is_dir():
-                        shutil.rmtree(to_delete)
-                        outcome = "\u2705"
-                    elif to_delete.is_file():
-                        to_delete.unlink()
-                        outcome = "\u2705"
-                    elif not to_delete.exists():
-                        outcome = "\u274E"
-                    else:
-                        outcome = "\uFE0F"
-                    context.events.finish_item(outcome)
+                    with context.events.item(f"Deleting {to_delete}") as item_outcome:
+                        if to_delete.is_dir():
+                            shutil.rmtree(to_delete)
+                            item_outcome.outcome = "\u2705"
+                        elif to_delete.is_file():
+                            to_delete.unlink()
+                            item_outcome.outcome = "\u2705"
+                        elif not to_delete.exists():
+                            item_outcome.outcome = "\u274E"
+                        else:
+                            item_outcome.outcome = "\uFE0F"
             clean.action = clean_action
 
         with setup.step("install-tox") as install_tox:

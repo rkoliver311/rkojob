@@ -141,8 +141,8 @@ class TestJobStatusImpl(TestCase):
         for key, expected_value in data.items():
             actual_value = event.data.get(key)
             self.assertEqual(
-                actual_value,
                 expected_value,
+                actual_value,
                 f"Mismatch in event field '{key}': expected {expected_value!r}, got {actual_value!r}.",
             )
 
@@ -484,6 +484,24 @@ class TestJobStatusImpl(TestCase):
             mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=3
         )
 
+    def test_item_using_outcome(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        with sut.scope(mock_scope):
+            with sut.item("item") as outcome:
+                outcome.outcome = "Finished!"
+
+        self.assertHandledEvent(
+            mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+        )
+        self.assertHandledEvent(mock_handler.handle, JobStartItemEvent, stub_context, mock_scope, item="item", index=1)
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="Finished!", index=2
+        )
+        self.assertHandledEvent(
+            mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=3
+        )
+
     def test_item_error(self) -> None:
         stub_context, mock_scope, mock_handler, sut = self._create_sut()
 
@@ -505,6 +523,29 @@ class TestJobStatusImpl(TestCase):
                 mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="done.", index=3
             )
             self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error=error, index=4)
+            self.assertHandledEvent(
+                mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=5
+            )
+
+    def test_item_using_outcome_error(self) -> None:
+        stub_context, mock_scope, mock_handler, sut = self._create_sut()
+
+        with self.assertRaises(Exception):
+            with sut.scope(mock_scope):
+                with sut.item("item") as outcome:
+                    outcome.error = "boom"
+
+            self.assertHandledEvent(
+                mock_handler.handle, JobStartScopeEvent, stub_context, None, started_scope=mock_scope, index=0
+            )
+            self.assertHandledEvent(
+                mock_handler.handle, JobStartItemEvent, stub_context, mock_scope, item="item", index=1
+            )
+            self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error="boom", index=2)
+            self.assertHandledEvent(
+                mock_handler.handle, JobFinishItemEvent, stub_context, mock_scope, outcome="done.", index=3
+            )
+            self.assertHandledEvent(mock_handler.handle, JobErrorEvent, stub_context, mock_scope, error="boom", index=4)
             self.assertHandledEvent(
                 mock_handler.handle, JobFinishScopeEvent, stub_context, None, finished_scope=mock_scope, index=5
             )

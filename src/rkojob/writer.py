@@ -263,6 +263,7 @@ class ItemStartEntry(JobWriterEntry[JobStartItemEvent]):
 
     def _write_event(self, stream: TextIO, depth: int, duration: timedelta | None = None) -> None:
         stream.write(f"{self.event.item}...")
+        stream.flush()
 
 
 class ItemFinishEntry(JobWriterEntry[JobFinishItemEvent]):

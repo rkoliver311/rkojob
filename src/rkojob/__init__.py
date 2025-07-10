@@ -106,6 +106,17 @@ class JobEventDispatcher(JobEventHandler, Protocol):
         """
 
 
+class ItemContextOutcome:
+    """
+    A class returned by the `JobStatus.item()` context manager that can be used
+    to set the outcome or error of an item.
+    """
+
+    def __init__(self, outcome: str = "done.", error: str | Exception | None = None) -> None:
+        self.outcome: str = outcome
+        self.error: str | Exception | None = error
+
+
 class JobStatus(JobEventHandler, ABC):
     """
     Convenience base class which defines methods for well-known `JobEvents`
@@ -310,21 +321,22 @@ class JobStatus(JobEventHandler, ABC):
             self.finish_section(section)
 
     @contextmanager
-    def item(self, item: str) -> Generator[None, None, None]:
+    def item(self, item: str) -> Generator[ItemContextOutcome, None, None]:
         """
         A context manager that calls `self.start_item(item)` on enter,
         `self.error(e)` on error, and `self.finish_item(item)` on exit.
 
         :param item: The item that will be started and finished.
         """
+        outcome: ItemContextOutcome = ItemContextOutcome()
         try:
             self.start_item(item)
-            yield
+            yield outcome
         except Exception as e:
-            self.error(e)
+            outcome.error = e
             raise
         finally:
-            self.finish_item()
+            self.finish_item(outcome=outcome.outcome, error=outcome.error)
 
 
 class JobScopeStatus(Enum):
