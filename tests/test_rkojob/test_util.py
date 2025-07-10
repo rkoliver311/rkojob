@@ -4,7 +4,7 @@
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -102,14 +102,16 @@ class TestShell(TestCase):
         )
 
     def test_tee_stdout(self) -> None:
-        with NamedTemporaryFile(mode="wt+") as temp_file:
-            sut = Shell()
-            sut._popen = self.mock_popen(stdout=["Hello, world!\n"], stderr=["Secret hello!\n"])
-            sut("greet", "Hello, world!", tee_stdout=temp_file.file)
-            sut._popen.assert_called_with(
-                ("greet", "Hello, world!"), stdout=-1, stderr=-1, text=True, cwd=None, env=None, shell=False
-            )
-            self.assertEqual("Hello, world!\n", Path(temp_file.name).read_text())
+        with TemporaryDirectory() as temp_dir:
+            temp_file_path = Path(temp_dir) / "temp_file.out"
+            with temp_file_path.open(mode="wt+") as temp_file:
+                sut = Shell()
+                sut._popen = self.mock_popen(stdout=["Hello, world!\n"], stderr=["Secret hello!\n"])
+                sut("greet", "Hello, world!", tee_stdout=temp_file)
+                sut._popen.assert_called_with(
+                    ("greet", "Hello, world!"), stdout=-1, stderr=-1, text=True, cwd=None, env=None, shell=False
+                )
+            self.assertEqual("Hello, world!\n", temp_file_path.read_text())
 
     def test_tee_stdout_and_stderr_same(self) -> None:
         with NamedTemporaryFile(mode="wt+") as temp_file:

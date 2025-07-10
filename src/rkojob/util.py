@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
 from os import PathLike
-from typing import IO, Any, Iterable, Type, TypeVar
+from threading import Thread
+from typing import IO, Any, Iterable, TextIO, Type, TypeVar
 
 
 class ShellResult:
@@ -96,6 +98,17 @@ class Shell:
                 return target, False
             return None, False
 
+        def _read_stream(
+            stream: TextIO, lines: list[str], tee_stream: TextIO | None, show_stream: TextIO | None
+        ) -> None:
+            for line in stream:
+                lines.append(line)
+                if show_stream:
+                    show_stream.write(line)
+                if tee_stream:
+                    tee_stream.write(line)
+                    tee_stream.flush()
+
         tee_stdout = _normalize_tee(tee_stdout)
         tee_stderr = _normalize_tee(tee_stderr)
 
@@ -114,6 +127,11 @@ class Shell:
         # Choose stderr handling mode
         stderr_setting: int = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        stdout_thread: Thread | None = None
+        stderr_thread: Thread | None = None
+
         proc = self._popen(
             args,
             stdout=subprocess.PIPE,
@@ -124,30 +142,33 @@ class Shell:
             shell=shell,
         )
 
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-
         # Capture and route stdout
         if proc.stdout:
-            for line in proc.stdout:
-                stdout_lines.append(line)
-                if show_stdout:
-                    sys.stdout.write(line)
-                if stdout_tee:
-                    stdout_tee.write(line)
-                    stdout_tee.flush()
+            stdout_thread = Thread(
+                target=_read_stream,
+                args=(proc.stdout, stdout_lines, sys.stdout if show_stdout else None, stdout_tee),
+                name="stdout_thread",
+            )
+            stdout_thread.start()
 
         # Capture stderr if separate
         if not stderr_to_stdout and proc.stderr:
-            for line in proc.stderr:
-                stderr_lines.append(line)
-                if show_stderr:
-                    sys.stderr.write(line)
-                if stderr_tee:
-                    stderr_tee.write(line)
-                    stderr_tee.flush()
+            stderr_thread = Thread(
+                target=_read_stream,
+                args=(proc.stderr, stderr_lines, sys.stderr if show_stderr else None, stderr_tee),
+                name="stderr_thread",
+            )
+            stderr_thread.start()
 
-        proc.wait()
+        try:
+            proc.wait()
+            if stdout_thread:
+                stdout_thread.join()
+            if stderr_thread:
+                stderr_thread.join()
+        except KeyboardInterrupt:  # pragma: no cover
+            if proc is not None:
+                proc.send_signal(signal.SIGINT)
 
         if stdout_tee and close_stdout:
             stdout_tee.close()
@@ -162,6 +183,7 @@ class Shell:
 
         if raise_on_error and result.return_code != 0:
             raise ShellException(result)
+
         return result
 
 
