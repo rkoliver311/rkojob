@@ -126,7 +126,7 @@ class ShellAction(JobAction):
         return self
 
 
-class ToolActionBuilder:
+class ShellActionBuilder:
     """
     A command builder class for constructing and later executing CLI tools as a
     ``ShellAction``. This class is used similarly to ``ToolBuilder`` but rather
@@ -156,7 +156,7 @@ class ToolActionBuilder:
         self._shell_kwargs.setdefault("show_stderr", False)
 
     def __getattr__(self, name: str):
-        return ToolActionBuilder(
+        return ShellActionBuilder(
             runner_type=self._runner_type, tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs
         )
 
@@ -216,7 +216,7 @@ class VerifyTestStructure(JobAction):
 
             relative_test_path: str = str(test_path.relative_to(test_root))
             context.events.start_item(f"{relative_source_path} -> {relative_test_path}")
-            error: str | None = "\u274c" if not test_path.exists() else None
+            error: str | None = f"{test_path} not found!" if not test_path.exists() else None
             context.events.finish_item("\u2705", error=error)
 
             if error:

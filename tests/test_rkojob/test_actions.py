@@ -10,7 +10,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from rkojob import JobContext, JobException, ValueRef, create_scope_id
-from rkojob.actions import ShellAction, ToolActionBuilder, VerifyPythonTestStructure
+from rkojob.actions import ShellAction, ShellActionBuilder, VerifyPythonTestStructure
 from rkojob.factories import JobContextFactory
 from rkojob.util import ShellException, ShellResult
 
@@ -138,10 +138,10 @@ class TestShellAction(TestCase):
         self.assertFalse(result_ref.has_value)
 
 
-class TestToolActionBuilder(TestCase):
+class TestShellActionBuilder(TestCase):
     @patch("rkojob.actions.Shell")
     def test(self, mock_shell_type) -> None:
-        sut = ToolActionBuilder("tool").command.sub_command("-v", enable_feature=True, keyword_arg="value")
+        sut = ShellActionBuilder("tool").command.sub_command("-v", enable_feature=True, keyword_arg="value")
         self.assertIsInstance(sut, ShellAction)
         sut.action(MagicMock())
         mock_shell_type.assert_called_once_with(show_stdout=False, show_stderr=False)
@@ -151,7 +151,7 @@ class TestToolActionBuilder(TestCase):
 
     @patch("rkojob.actions.Shell")
     def test_with_shell_kwargs(self, mock_shell_type) -> None:
-        sut = ToolActionBuilder("tool", show_stdout=True, env={"var": "value"}).command.sub_command(
+        sut = ShellActionBuilder("tool", show_stdout=True, env={"var": "value"}).command.sub_command(
             "-v", enable_feature=True, keyword_arg="value"
         )
         self.assertIsInstance(sut, ShellAction)

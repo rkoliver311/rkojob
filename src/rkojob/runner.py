@@ -211,7 +211,7 @@ class JobRunnerImpl:
             if not could_run or skip_if is None:
                 # The scope should not run or there is no additional condition to consider.
                 # Use the run condition.
-                return not could_run, reason
+                return not could_run, f"Run condition not met: {reason}"
 
             # Scope could run but may still be skipped.
             return self._resolve_conditional(context, skip_if)
