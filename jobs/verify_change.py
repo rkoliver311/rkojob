@@ -7,11 +7,11 @@ from pathlib import Path
 
 # Dog-fooding: verify-change job
 from rkojob import context_value, lazy_action, lazy_format, JobContext
-from rkojob.actions import ToolActionBuilder, VerifyPythonTestStructure
+from rkojob.actions import ShellActionBuilder, VerifyPythonTestStructure
 from rkojob.job import JobBuilder
 
-pip = ToolActionBuilder("pip")
-tox = ToolActionBuilder("tox")
+pip = ShellActionBuilder("pip")
+tox = ShellActionBuilder("tox")
 
 with JobBuilder("verify-change") as job:
 
