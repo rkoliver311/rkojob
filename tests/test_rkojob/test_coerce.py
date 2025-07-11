@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 from unittest import TestCase
 
-from rkojob.coerce import as_bool, as_float, as_int, as_path, as_str
+from rkojob.coerce import as_bool, as_float, as_int, as_json_str, as_path, as_str
 
 
 class CoercionTest(TestCase):
@@ -109,3 +109,29 @@ class TestAsPath(TestCase):
     def test_path(self) -> None:
         value = Path("/foo/bar")
         self.assertIs(value, as_path(value))
+
+
+class TestAsJsonStr(TestCase):
+    def test_none(self) -> None:
+        self.assertEqual("null", as_json_str(None))
+
+    def test_str(self) -> None:
+        self.assertEqual('"value"', as_json_str("value"))
+
+    def test_bool(self) -> None:
+        self.assertEqual("true", as_json_str(True))
+
+    def test_number(self) -> None:
+        self.assertEqual("1.23", as_json_str(1.23))
+
+    def test_number2(self) -> None:
+        self.assertEqual("123", as_json_str(123))
+
+    def test_list(self) -> None:
+        self.assertEqual('["this", "thing"]', as_json_str(["this", "thing"]))
+
+    def test_dict(self) -> None:
+        self.assertEqual(
+            '{"key": "value", "key2": [1, 2, 3], "key3": false}',
+            as_json_str({"key": "value", "key2": [1, 2, 3], "key3": False}),
+        )

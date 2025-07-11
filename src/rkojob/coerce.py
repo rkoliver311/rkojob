@@ -2,7 +2,7 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
+import json
 import os
 from os import PathLike
 from pathlib import Path
@@ -90,3 +90,13 @@ def as_path(value: str | PathLike | None) -> Path | None:
     if value is None or isinstance(value, Path):
         return value
     return Path(os.fspath(value))
+
+
+def as_json_str(value: Any) -> str:
+    """
+    Coerces a value to JSON string.
+
+    :param value: The value to coerce.
+    :returns: The `value` as a JSON string.
+    """
+    return json.dumps(value)

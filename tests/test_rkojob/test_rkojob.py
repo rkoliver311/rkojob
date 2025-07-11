@@ -3,6 +3,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 from enum import Enum, auto
+from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -37,7 +38,7 @@ from rkojob import (
     scope_succeeding,
     unassign_value,
 )
-from rkojob.coerce import as_bool
+from rkojob.coerce import as_bool, as_json_str
 from rkojob.factories import JobContextFactory
 from rkojob.values import ComputedValue, NoValueError, ValueRef, Values
 
@@ -285,6 +286,13 @@ class TestContextValue(TestCase):
         mock_context = MagicMock(values=Values(key="True"))
         sut: JobCallable[bool] = context_value("key", coercer=as_bool)
         self.assertTrue(sut(mock_context))
+
+    def test_coerce_to_json(self) -> None:
+        mock_context = MagicMock(values=Values(**{"json": {"key": "value"}}))
+        sut: JobCallable[dict[str, Any]] = context_value("json")
+        self.assertEqual({"key": "value"}, sut(mock_context))
+        sut2: JobCallable[str] = context_value("json", coercer=as_json_str)
+        self.assertEqual('{"key": "value"}', sut2(mock_context))
 
     def test_repr(self) -> None:
         self.assertEqual("context_value('key')", repr(context_value("key")))
