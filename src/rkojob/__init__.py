@@ -1011,6 +1011,14 @@ def resolve_map(
     return {key: resolve_value(value, context=context, raise_no_value=raise_no_value) for key, value in values.items()}
 
 
+def lazy_map_value(value: JobResolvableValue[T], func: Callable[[T | None], R_co]) -> JobResolvableValue[R_co]:
+    def _map(context: JobContext) -> R_co:
+        resolved_value: T | None = resolve_value(value, context=context)
+        return func(resolved_value)
+
+    return _map
+
+
 FORMAT_MAP_KEY_PATTERN = re.compile(r"\{([a-zA-Z_][\w\.]*)(?:![rs])?(?::[^{}]+)?}")
 
 
