@@ -114,6 +114,9 @@ class TestMappedValueProvider(TestCase):
     def test_map(self) -> None:
         self.assertEqual("FOO", ValueRef("foo").map(lambda x: str(x).upper()).value)
 
+    def test_map_map(self) -> None:
+        self.assertEqual("FOO!", ValueRef("foo").map(lambda x: str(x).upper()).map(lambda x: f"{x}!").value)
+
 
 class TestComputedValue(TestCase):
     def test_value(self) -> None:

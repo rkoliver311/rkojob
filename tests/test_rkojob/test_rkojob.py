@@ -29,6 +29,7 @@ from rkojob import (
     job_succeeding,
     lazy_action,
     lazy_format,
+    lazy_map_value,
     resolve_map,
     resolve_value,
     resolve_values,
@@ -455,6 +456,14 @@ class TestResolveMap(TestCase):
             resolve_map(
                 ref1=ValueRef("value1"), ref2=ValueKey("int_key"), context=MagicMock(values=Values(int_key=123))
             ),
+        )
+
+
+class TestLazyMapValue(TestCase):
+    def test(self) -> None:
+        context: JobContext = JobContextFactory.create(values=dict(key="value"))
+        self.assertEqual(
+            "VALUE", resolve_value(lazy_map_value(context_value("key"), lambda s: str(s).upper()), context=context)
         )
 
 

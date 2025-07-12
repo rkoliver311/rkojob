@@ -197,6 +197,16 @@ class MappedValueProvider(ValueProvider[U]):
         """:returns: The transformed value."""
         return self.get()
 
+    def map(self, func: Callable[[U], T]) -> MappedValueProvider[T]:
+        """
+        Creates a ``ValueProvider`` instance that transforms (maps) the value held by this instance. The value is a live
+        view of this ``MappedValueProvider``'s value.
+
+        :param func: The transformation function.
+        :returns: A ``ValueProvider`` that transforms the value held by this ``MappedValueProvider``.
+        """
+        return MappedValueProvider(func, provider=self)
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}"
 
