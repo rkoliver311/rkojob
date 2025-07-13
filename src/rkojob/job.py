@@ -130,6 +130,8 @@ class JobGroup(JobScopeIDMixin):
         self,
         name: str,
         scopes: list[JobGroup | JobStage | JobStep[Any]] | None = None,
+        run_if: JobConditionalType | None = None,
+        skip_if: JobConditionalType | None = None,
         concurrent: bool = False,
         id: JobIdType | None = None,
     ):
@@ -137,6 +139,8 @@ class JobGroup(JobScopeIDMixin):
         if scopes is None:
             scopes = []
         self._scopes: list[JobGroup | JobStage | JobStep[Any]] = scopes
+        self._run_if: JobConditionalType | None = run_if
+        self._skip_if: JobConditionalType | None = skip_if
         self._concurrent: bool = concurrent
         self._id: JobIdType = id or create_scope_id()
 
@@ -158,6 +162,22 @@ class JobGroup(JobScopeIDMixin):
 
     @delegate(continue_on_error=True)
     def teardown(self, context: JobContext) -> None: ...
+
+    @property
+    def run_if(self) -> JobConditionalType | None:
+        return self._run_if
+
+    @run_if.setter
+    def run_if(self, value: JobConditionalType | None) -> None:
+        self._run_if = value
+
+    @property
+    def skip_if(self) -> JobConditionalType | None:
+        return self._skip_if
+
+    @skip_if.setter
+    def skip_if(self, value: JobConditionalType | None) -> None:
+        self._skip_if = value
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
@@ -238,6 +258,8 @@ class JobStageGroupBuilder(AbstractContextManager, JobScopeIDMixin):
 
         self._scopes: list[JobGroup | JobStage | JobStep[Any]] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
+        self.run_if: JobConditionalType | None = None
+        self.skip_if: JobConditionalType | None = None
         self.concurrent: bool = concurrent
 
     def __exit__(self, exc_type, exc_value, traceback, /):
@@ -259,7 +281,14 @@ class JobStageGroupBuilder(AbstractContextManager, JobScopeIDMixin):
         self._scopes.append(scope)
 
     def build(self) -> JobGroup:
-        group: JobGroup = JobGroup(name=self._name, scopes=self._scopes, concurrent=self.concurrent, id=self._id)
+        group: JobGroup = JobGroup(
+            name=self._name,
+            scopes=self._scopes,
+            run_if=self.run_if,
+            skip_if=self.skip_if,
+            concurrent=self.concurrent,
+            id=self._id,
+        )
         group.teardown += self.teardown
         return group
 
@@ -276,6 +305,8 @@ class JobGroupBuilder(AbstractContextManager, JobScopeIDMixin):
 
         self._scopes: list[JobGroup | JobStage | JobStep[Any]] = []
         self.teardown: Delegate[[JobContext], None] = Delegate(continue_on_error=True)
+        self.run_if: JobConditionalType | None = None
+        self.skip_if: JobConditionalType | None = None
         self.concurrent: bool = concurrent
 
     def __exit__(self, exc_type, exc_value, traceback, /):
@@ -303,7 +334,14 @@ class JobGroupBuilder(AbstractContextManager, JobScopeIDMixin):
         self._scopes.append(scope)
 
     def build(self) -> JobGroup:
-        group: JobGroup = JobGroup(name=self._name, scopes=self._scopes, concurrent=self.concurrent, id=self._id)
+        group: JobGroup = JobGroup(
+            name=self._name,
+            scopes=self._scopes,
+            run_if=self.run_if,
+            skip_if=self.skip_if,
+            concurrent=self.concurrent,
+            id=self._id,
+        )
         group.teardown += self.teardown
         return group
 
