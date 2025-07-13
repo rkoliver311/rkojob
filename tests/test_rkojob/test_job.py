@@ -142,6 +142,22 @@ class TestJobGroup(TestCase):
         self.assertEqual("step1", sut.scopes[1].name)
         self.assertEqual("stage1", sut.scopes[2].name)
 
+    def test_skip_if(self) -> None:
+        skip_if = ValueRef(True)
+        sut: JobGroup = JobGroup("name", skip_if=skip_if)
+        self.assertIs(skip_if, sut.skip_if)
+
+        sut.skip_if = (False, "Don't skip.")
+        self.assertEqual((False, "Don't skip."), sut.skip_if)
+
+    def test_run_if(self) -> None:
+        run_if = ValueRef((True, "Always run."))
+        sut: JobGroup = JobGroup("name", run_if=run_if)
+        self.assertIs(run_if, sut.run_if)
+
+        sut.run_if = ValueRef((False, "Don't run."))
+        self.assertEqual((False, "Don't run."), sut.run_if.get())
+
     def test_id(self):
         self.assertEqual("scope_id", JobGroup("name", id="scope_id").id)
         self.assertIsNotNone(JobGroup("name", id=None).id)
