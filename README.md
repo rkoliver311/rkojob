@@ -1,5 +1,3 @@
-from rkojob.concurrent import JobScopeInterrupt
-
 # rkoJob
 
 **rkoJob** is a lightweight framework for defining and running
