@@ -1226,6 +1226,43 @@ class _JobScopeCondition:
         return self._reason
 
 
+def scope_condition(
+    value: JobResolvableValue[Any | None],
+    func: Callable[[Any | None], Any | None] | None = None,
+    reason: str | None = None,
+) -> _JobScopeCondition:
+    """
+    Constructs a condition to be evaluated at runtime when deciding whether to
+    run or skip a scope.
+
+    The `value` is resolved just before the scope is evaluated. If provided,
+    `func` is applied to the resolved value to transform or interpret it.
+    The result is then used as the condition.
+
+    The final outcome (whether the scope runs or is skipped) depends on how the
+    condition is applied: for example, as a `run_if` (runs when the condition
+    is truthy) or a `skip_if` (skips when truthy).
+
+    :param value: A ``JobResolvableValue`` to be resolved at evaluation time.
+    :param func: Optional transformation or predicate function applied to the
+     resolved value.
+    :param reason: Optional message recorded if the scope is skipped due to
+     this condition.
+    :returns: A ``_JobScopeCondition`` that can be used in `run_if` or
+     `skip_if`.
+    """
+
+    def _func(context: JobContext) -> bool:
+        result: Any | None = resolve_value(value, context=context)
+        if isinstance(result, tuple) and isinstance(value, _JobScopeCondition):
+            result = result[0]
+        if func:
+            result = func(result)
+        return bool(result)
+
+    return _JobScopeCondition(_func, reason if reason else "Condition is True")
+
+
 job_always = _JobScopeCondition(lambda _: True, "Always")
 """Scope condition that always returns ``True``."""
 

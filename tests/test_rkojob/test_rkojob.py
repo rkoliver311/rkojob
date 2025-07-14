@@ -33,6 +33,7 @@ from rkojob import (
     resolve_map,
     resolve_value,
     resolve_values,
+    scope_condition,
     scope_failing,
     scope_ran,
     scope_status,
@@ -517,6 +518,37 @@ class TestUnassignValue(TestCase):
         with self.assertRaises(JobException) as e:
             unassign_value("foo")  # type: ignore[arg-type]
         self.assertEqual("Unable to unassign foo", str(e.exception))
+
+
+class TestScopeCondition(TestCase):
+    def test_value(self) -> None:
+        sut = scope_condition(True)
+        self.assertEqual((True, "Condition is True"), sut(MagicMock()))
+
+    def test_reason(self) -> None:
+        sut = scope_condition(True, reason="True is True")
+        self.assertEqual((True, "True is True"), sut(MagicMock()))
+
+    def test_func(self) -> None:
+        sut = scope_condition(False, func=lambda f: not f, reason="False is False")
+        self.assertEqual((True, "False is False"), sut(MagicMock()))
+
+    def test_non_bool(self) -> None:
+        sut = scope_condition(ValueRef([1, 2, 3]), reason="List is not empty")
+        self.assertEqual((True, "List is not empty"), sut(MagicMock()))
+
+    def test_non_bool_with_func(self) -> None:
+        sut = scope_condition(ValueRef([1, 2, 3]), func=lambda x: x and 4 in x, reason="List has a 4")
+        self.assertEqual((False, "List has a 4"), sut(MagicMock()))
+
+    def test_scope_condition(self) -> None:
+        condition = scope_condition(ValueRef(False))
+        sut = scope_condition(condition, func=lambda c: not c)
+        self.assertEqual((True, "Condition is True"), sut(MagicMock()))
+
+    def test_value_is_func(self) -> None:
+        sut = scope_condition(lambda _: True)
+        self.assertEqual((True, "Condition is True"), sut(MagicMock()))
 
 
 class TestScopeRan(TestCase):
