@@ -111,11 +111,23 @@ class TestMappedValueProvider(TestCase):
         ref.value = "foo"
         self.assertTrue(sut.has_value)
 
+    def test_get_or_else(self) -> None:
+        ref: ValueRef[str] = ValueRef()
+        sut = MappedValueProvider(lambda x: str(x).upper(), ref)
+        self.assertEqual("default", sut.get_or_else("default"))
+        ref.value = "foo"
+        self.assertEqual("FOO", sut.value)
+
     def test_map(self) -> None:
         self.assertEqual("FOO", ValueRef("foo").map(lambda x: str(x).upper()).value)
 
     def test_map_map(self) -> None:
         self.assertEqual("FOO!", ValueRef("foo").map(lambda x: str(x).upper()).map(lambda x: f"{x}!").value)
+
+    def test_repr(self) -> None:
+        ref: ValueRef[str] = ValueRef()
+        self.assertEqual("MappedValueProvider", repr(MappedValueProvider(ref)))
+        self.assertEqual("mapped value", repr(MappedValueProvider(ref, name="mapped value")))
 
 
 class TestComputedValue(TestCase):
