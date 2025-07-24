@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from rkojob import (
     JobAction,
+    JobAssignableValue,
     JobCallable,
     JobContext,
     JobException,
@@ -272,6 +273,12 @@ class TestContextValue(TestCase):
         self.assertEqual("default", resolve_value(sut, context=mock_context))
         self.assertEqual("default", mock_context.values.get("key"))
 
+    def test_set(self) -> None:
+        mock_context = MagicMock(values=Values(key="value"))
+        sut: JobAssignableValue[str] = context_value("key")
+        assign_value(sut, "value2", context=mock_context)
+        self.assertEqual("value2", resolve_value(sut, context=mock_context))
+
     def test_raise(self) -> None:
         mock_context = MagicMock(values=Values())
         sut: JobResolvableValue[str] = context_value("key")
@@ -456,6 +463,17 @@ class TestResolveMap(TestCase):
             {"ref1": "value1", "ref2": 123},
             resolve_map(
                 ref1=ValueRef("value1"), ref2=ValueKey("int_key"), context=MagicMock(values=Values(int_key=123))
+            ),
+        )
+
+    def test_recursive(self) -> None:
+        int_ref = ValueRef(2)
+        self.assertEqual(
+            {"ref1": "value1", "ref2": {"ref3": [1, 2, 3]}},
+            resolve_map(
+                ref1=ValueRef("value1"),
+                ref2=ValueRef(dict(ref3=ValueKey("list_key"))),
+                context=MagicMock(values=Values(list_key=[1, int_ref, 3])),
             ),
         )
 
