@@ -40,6 +40,7 @@ from rkojob.values import (
     NoValueType,
     ValueConsumer,
     ValueKey,
+    ValueOrRef,
     ValueProvider,
     ValueRef,
     Values,
@@ -936,24 +937,6 @@ def resolve_value(
     :param raise_no_value: Whether to raise a NoValueError if the value cannot be resolved.
     :returns: The value or `default`.
     """
-    if isinstance(value, ValueKey):
-        # The value is a key used to resolve a value
-        # from the context's Value's instance.
-        if context:
-            if raise_no_value or context.values.has_value(value):
-                # Either we want to raise an error instead of returning
-                # the default, or we know we have a value.
-                return context.values.get(value)
-            else:
-                # We don't want to raise an error, and we
-                # don't have the value. Return the default.
-                return default
-
-        # No context to resolve value
-        if raise_no_value:
-            raise NoValueError("Unable to resolve value without context.")
-        return default
-
     if isinstance(value, ValueProvider):
         # The value is a value provider which
         # may or may not have a value.
@@ -970,6 +953,24 @@ def resolve_value(
         # JobContext as a arg and returns a value.
         if context:
             return value(context)
+        if raise_no_value:
+            raise NoValueError("Unable to resolve value without context.")
+        return default
+
+    if isinstance(value, ValueKey):
+        # The value is a key used to resolve a value
+        # from the context's Value's instance.
+        if context:
+            if raise_no_value or context.values.has_value(value):
+                # Either we want to raise an error instead of returning
+                # the default, or we know we have a value.
+                return context.values.get(value)
+            else:
+                # We don't want to raise an error, and we
+                # don't have the value. Return the default.
+                return default
+
+        # No context to resolve value
         if raise_no_value:
             raise NoValueError("Unable to resolve value without context.")
         return default
@@ -1008,7 +1009,15 @@ def resolve_map(
     """
     if values is None:
         values = kwargs
-    return {key: resolve_value(value, context=context, raise_no_value=raise_no_value) for key, value in values.items()}
+    resolved: dict[Any, Any] = {}
+    for key, value in values.items():
+        value = resolve_value(value, context=context, raise_no_value=raise_no_value)
+        if isinstance(value, dict):
+            value = resolve_map(value, context=context, raise_no_value=raise_no_value)
+        if isinstance(value, list):
+            value = resolve_values(value, context=context, raise_no_value=raise_no_value)
+        resolved[key] = value
+    return resolved
 
 
 def lazy_map_value(value: JobResolvableValue[T], func: Callable[[T | None], R_co]) -> JobResolvableValue[R_co]:
@@ -1073,10 +1082,8 @@ class _JobContextIdentity:
 job_context = _JobContextIdentity()
 
 
-class context_value(Generic[R_co]):
-    def __init__(
-        self, key: str, coercer: Callable[[Any], R_co] | None = None, default: R_co | NoValueType = NoValue
-    ) -> None:
+class context_value(ValueKey[T]):
+    def __init__(self, key: str, coercer: Callable[[Any], T] | None = None, default: T | NoValueType = NoValue) -> None:
         """
         Retrieve a value from the context using a key that is resolved relative
         to the current scope stack. For example, with the key `foo` and the
@@ -1089,16 +1096,16 @@ class context_value(Generic[R_co]):
         :param default: An optional default to use if no value is found; will
          be set and returned.
         """
-        self._key: str = key
-        self._coercer: Callable[[Any], R_co] | None = coercer
-        self._default: R_co | NoValueType = default
+        super().__init__(key)
+        self._coercer: Callable[[Any], T] | None = coercer
+        self._default: T | NoValueType = default
 
-    def __call__(self, context: JobContext) -> R_co:
+    def __call__(self, context: JobContext) -> T:
         value: Any = NoValue
         # Get the names of the current scopes
         scopes: list[str] = [scope.name for scope in context.scopes]
         # Generate a list of keys that we will try prefixed with the scopes (see docstring)
-        keys: list[str] = [f"{'.'.join(scopes[:i])}.{self._key}" for i in range(len(scopes), 0, -1)]
+        keys: list[str] = [f"{'.'.join(scopes[:i])}.{self.name}" for i in range(len(scopes), 0, -1)]
 
         # Try scope-prefixed keys first
         for key in keys:
@@ -1109,16 +1116,16 @@ class context_value(Generic[R_co]):
         if value is NoValue:
             # No value was found using prefixed keys. Try the bare key.
 
-            if not context.values.has_value(self._key) and self._default is not NoValue:
+            if not context.values.has_value(self) and not isinstance(self._default, NoValueType):
                 # The context does not have the value but a
                 # default was provided. Set it and allow it to
                 # be looked up below.
-                context.values.set(self._key, self._default)
+                self.set(context, self._default)
 
             try:
-                value = context.values.get(self._key)
+                value = context.values.get(self)
             except NoValueError:
-                message: str = f"No context value found for key '{self._key}'"
+                message: str = f"No context value found for key '{self}'"
                 if keys:
                     message += f" (first tried: {keys})."
                 raise NoValueError(message)
@@ -1126,12 +1133,22 @@ class context_value(Generic[R_co]):
         if self._coercer:
             value = self._coercer(value)
 
-        return cast(R_co, value)
+        return cast(T, value)
+
+    def set(self, context: JobContext, value: ValueOrRef[T]) -> None:
+        """
+        Sets the value associated with this `context_value`'s key in the
+        context's ``Values`` instance.
+
+        :param context: The context to set the value for.
+        :param value: The value to set in the context.
+        """
+        context.values.set(self, value)
 
     def __repr__(self) -> str:
         if self._coercer:
-            return f"context_value('{self._key}', {self._coercer.__name__})"
-        return f"context_value('{self._key}')"
+            return f"context_value('{self.name}', {self._coercer.__name__})"
+        return f"context_value('{self.name}')"
 
 
 environment_variable: type[EnvironmentVariable] = EnvironmentVariable
