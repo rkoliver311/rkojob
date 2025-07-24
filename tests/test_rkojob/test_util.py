@@ -28,6 +28,12 @@ class TestShellException(TestCase):
         self.assertIs(result, sut.result)
         self.assertEqual("error", str(sut))
 
+    def test_no_stderr(self) -> None:
+        result = ShellResult(return_code=1, stdout="Working...", stderr="")
+        sut = ShellException(result=result)
+        self.assertIs(result, sut.result)
+        self.assertEqual("return_code=1", str(sut))
+
 
 class TestShell(TestCase):
     def mock_popen(self, return_code: int = 0, stdout: list[str] | None = None, stderr: list[str] | None = None):

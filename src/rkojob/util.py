@@ -24,7 +24,7 @@ class ShellResult:
 
 class ShellException(Exception):
     def __init__(self, result: ShellResult) -> None:
-        super().__init__(result.stderr)
+        super().__init__(result.stderr if result.stderr else f"return_code={result.return_code}")
         self.result: ShellResult = result
 
 
