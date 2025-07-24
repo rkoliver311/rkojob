@@ -132,6 +132,11 @@ class Shell:
         stdout_thread: Thread | None = None
         stderr_thread: Thread | None = None
 
+        if env is not None:
+            combined_env: dict[str, Any] = {**os.environ}
+            combined_env.update(**env)
+            env = combined_env
+
         proc = self._popen(
             args,
             stdout=subprocess.PIPE,
@@ -246,10 +251,10 @@ class ToolBuilder:
 
     """
 
-    def __init__(self, *commands: str, default_runner_type: Type[ToolRunner] | None = None, shell: Shell | None = None):
+    def __init__(self, *commands: str, runner_type: Type[ToolRunner] | None = None, shell: Shell | None = None):
         """
         :param commands: Optional initial command parts.
-        :param default_runner_type: Optional default `ToolRunner` type used to
+        :param runner_type: Optional default `ToolRunner` type used to
          prepare and execute the tool.
         :param shell: Optional `Shell` instance to use instead of default.
         """
@@ -257,22 +262,18 @@ class ToolBuilder:
         self._shell: Shell | None = shell
 
         self._builder_type: Type[ToolBuilder] = type(self)
-        self._runner_type: Type[ToolRunner] = default_runner_type or ToolRunner
+        self._runner_type: Type[ToolRunner] = runner_type or ToolRunner
 
-    def prepare(self, *args, runner_type: type[ToolRunner] | None = None, **kwargs) -> ToolRunner:
+    def prepare(self, *args, **kwargs) -> ToolRunner:
         """
         Prepare the command and create a `ToolRunner` for deferred execution.
         :param args: Additional args to be passed into the command.
-        :param runner_type: The type of `ToolRunner` instance to create and return.
         :param kwargs: Additional kwargs to be passed into the command.
         """
-        if runner_type is None:
-            runner_type = self._runner_type
-
-        return runner_type(self._commands, *args, **kwargs, shell=self._shell)
+        return self._runner_type(self._commands, *args, **kwargs, shell=self._shell)
 
     def __getattr__(self, name: str):
-        return self._builder_type(*self._commands, name, shell=self._shell)
+        return self._builder_type(*self._commands, name, runner_type=self._runner_type, shell=self._shell)
 
     def __call__(self, *args: Any, **kwargs) -> ShellResult:
         runner: ToolRunner = self.prepare(*args, **kwargs)
