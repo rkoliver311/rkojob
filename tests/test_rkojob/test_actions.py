@@ -44,6 +44,8 @@ class TestShellAction(TestCase):
         sut = ShellAction("echo", "ok")
         sut.with_env(VAR="value")
         sut.action(context)
+        expected_command = shlex.join(("echo", "ok")) + " (env={'VAR': 'value'})"
+        context.events.section.assert_called_once_with(f"Executing {expected_command}")
         mock_shell_cls.assert_called_once_with(env={"VAR": "value"})
         mock_shell_cls().assert_called_once_with("echo", "ok")
 
@@ -53,6 +55,16 @@ class TestShellAction(TestCase):
 
         sut = ShellAction("echo", "ok")
         sut.in_dir("/some/path")
+        sut.action(context)
+        mock_shell_cls.assert_called_once_with(cwd="/some/path")
+        mock_shell_cls().assert_called_once_with("echo", "ok")
+
+    @patch("rkojob.actions.Shell")
+    def test_in_dir_as_resolvable(self, mock_shell_cls):
+        context = self.make_context()
+
+        sut = ShellAction("echo", "ok")
+        sut.in_dir(ValueRef("/some/path"))
         sut.action(context)
         mock_shell_cls.assert_called_once_with(cwd="/some/path")
         mock_shell_cls().assert_called_once_with("echo", "ok")

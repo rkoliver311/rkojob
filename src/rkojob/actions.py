@@ -76,7 +76,11 @@ class ShellAction(JobAction):
         args: list[Any] = resolve_values(self._args, context=context)
         kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
         shell: Shell = Shell(**kwargs)
+
         command: str = shlex.join(args)
+        options: str = ", ".join(f"{key}={value}" for key, value in kwargs.items() if key in ("cwd", "env"))
+        if options:
+            command = f"{command} ({options})"
 
         result: ShellResult | None = None
         with context.events.section(f"Executing {command}"):
@@ -115,7 +119,7 @@ class ShellAction(JobAction):
         self._kwargs["env"] = env
         return self
 
-    def in_dir(self, cwd: str | PathLike) -> ShellAction:
+    def in_dir(self, cwd: JobResolvableValue[str | PathLike]) -> ShellAction:
         """
         Set the current working directory that the shell command will be executed in.
 
@@ -148,24 +152,18 @@ class ShellActionBuilder:
         :param tool_builder: Used internally for building sub-commands.
         :param kwargs: Additional keyword arguments to pass to ``ShellAction``.
         """
-        self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts)
-        self._runner_type: type[ToolRunner] | None = runner_type
+        self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts, runner_type=runner_type)
         self._shell_kwargs: dict[str, Any] = kwargs
         # Default to not showing any output
         self._shell_kwargs.setdefault("show_stdout", False)
         self._shell_kwargs.setdefault("show_stderr", False)
 
     def __getattr__(self, name: str):
-        return ShellActionBuilder(
-            runner_type=self._runner_type, tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs
-        )
+        return ShellActionBuilder(tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs)
 
     def __call__(self, *args, **kwargs) -> ShellAction:
         # Return a ShellAction which will execute the actual command.
-        return ShellAction(
-            *self._tool_builder.prepare(*args, **kwargs, runner_type=self._runner_type).command,
-            **self._shell_kwargs,
-        )
+        return ShellAction(*self._tool_builder.prepare(*args, **kwargs).command, **self._shell_kwargs)
 
 
 class VerifyTestStructure(JobAction):
