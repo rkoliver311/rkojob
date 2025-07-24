@@ -2,10 +2,10 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, mock
 from unittest.mock import MagicMock
 
 from rkojob.util import (
@@ -123,6 +123,27 @@ class TestShell(TestCase):
             )
             self.assertEqual("Hello, world!\nSecret hello!\n", Path(temp_file.name).read_text())
 
+    @mock.patch.dict(os.environ, {"var1": "value1", "var2": "value2"}, clear=True)
+    def test_env(self) -> None:
+        sut = Shell()
+        sut._popen = self.mock_popen(stdout=["Hello, world!\n"], stderr=["Secret hello!\n"])
+
+        result: ShellResult = sut("greet", "Hello, world!", env={"var2": "override"})
+
+        sut._popen.assert_called_with(
+            ("greet", "Hello, world!"),
+            stdout=-1,
+            stderr=-1,
+            text=True,
+            cwd=None,
+            env={"var1": "value1", "var2": "override"},
+            shell=False,
+        ),
+
+        self.assertEqual("Hello, world!\n", result.stdout)
+        self.assertEqual("Secret hello!\n", result.stderr)
+        self.assertEqual(0, result.return_code)
+
     def test_real(self) -> None:
         sut = Shell()
         result: ShellResult = sut("echo", "Hello, world!")
@@ -203,7 +224,8 @@ class TestToolBuilder(TestCase):
 
         class SubClassBuilder(ToolBuilder):
             def __init__(self, *args, **kwargs):
-                super().__init__(*args, default_runner_type=SubClassRunner, **kwargs)
+                kwargs.setdefault("runner_type", SubClassRunner)
+                super().__init__(*args, **kwargs)
 
         sut = SubClassBuilder("tool").sub_command
         self.assertIsInstance(sut, SubClassBuilder)
