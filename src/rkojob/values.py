@@ -145,15 +145,16 @@ class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
         """:returns: The optional name of this ``ValueRef``."""
         return self._name
 
-    def map(self, func: Callable[[T], U]) -> MappedValueProvider[U]:
+    def map(self, func: Callable[[T], U], name: str | None = None) -> MappedValueProvider[U]:
         """
         Creates a ``ValueProvider`` instance that transforms (maps) the value held by this instance. The value is a live
         view of this ``ValueRef``'s value.
 
         :param func: The transformation function.
+        :param name: Optional new name for the provider.
         :returns: A ``ValueProvider`` that transforms the value held by this ``ValueRef``.
         """
-        return MappedValueProvider(func, provider=self)
+        return MappedValueProvider(func, provider=self, name=name or f"mapped {self._name}")
 
     def __str__(self) -> str:
         return str(self.value)
@@ -172,14 +173,18 @@ class ValueRef(Generic[T], ValueProvider[T], ValueConsumer[T]):
 
 
 class MappedValueProvider(ValueProvider[U]):
-    def __init__(self, func: Callable[[T], U], provider: ValueProvider[T] | None = None) -> None:
+    def __init__(
+        self, func: Callable[[T], U], provider: ValueProvider[T] | None = None, name: str | None = None
+    ) -> None:
         """
         A ``ValueProvider`` that transforms the value returned by another ``ValueProvider``.
         :param func: The transformation function.
-        :provider: The provider that provides the value to transform.
+        :param provider: The provider that provides the value to transform.
+        :param name: Optional name for the mapped provider.
         """
         self._func: Callable[[T], U] = func
         self._provider: ValueProvider[T] | None = provider
+        self._name: str | None = name
 
     def get(self) -> U:
         """:returns: The transformed value."""
@@ -197,6 +202,13 @@ class MappedValueProvider(ValueProvider[U]):
         """:returns: The transformed value."""
         return self.get()
 
+    def get_or_else(self, default: U | None) -> U | None:
+        """
+        Gets the value held by this instance or returns `default` if no value is present.
+        :param default: The value to return if no value is present.
+        """
+        return self.get() if self.has_value else default
+
     def map(self, func: Callable[[U], T]) -> MappedValueProvider[T]:
         """
         Creates a ``ValueProvider`` instance that transforms (maps) the value held by this instance. The value is a live
@@ -208,6 +220,8 @@ class MappedValueProvider(ValueProvider[U]):
         return MappedValueProvider(func, provider=self)
 
     def __repr__(self) -> str:
+        if self._name:
+            return self._name
         return f"{self.__class__.__name__}"
 
 
@@ -311,6 +325,9 @@ class ValueKey(Generic[T]):
         :param name: The key name.
         """
         self.name: str = name
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class ValuesRef(ValueRef[T]):
