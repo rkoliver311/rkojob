@@ -36,13 +36,13 @@ API:
 from pathlib import Path
 
 from rkojob import context_value
-from rkojob.actions import ShellAction, ToolActionBuilder
+from rkojob.actions import ShellAction, ShellActionBuilder
 from rkojob.coerce import as_bool
 from rkojob.job import JobBuilder
 from rkojob.values import ComputedValue
 
-pip = ToolActionBuilder("pip")
-cat = ToolActionBuilder("cat")
+pip = ShellActionBuilder("pip")
+cat = ShellActionBuilder("cat")
 
 def path_exists(path: str) -> ComputedValue[bool]:
     return ComputedValue(lambda: Path(path).exists())
@@ -122,7 +122,7 @@ evaluating conditions like `run_if` and `skip_if`.
 
 ------------------------------------------------------------------------
 
-### `Job`, `JobStage`, and `JobStep`
+### `Job`, `JobStage`, `JobStep`, and `JobGroup`
 
 Concrete implementations of the `JobScope` protocol:
 
@@ -131,6 +131,9 @@ Concrete implementations of the `JobScope` protocol:
   phases like "build" or "test".
 - **`JobStep`**: The atomic unit of execution. Each step wraps an
   `action` and associated logic.
+- **`JobGroup`**: A logical grouping of stages or steps within a `Job`
+  or `JobStage`. Useful when needing to conditionally run a group of
+  stages or steps.
 
 ------------------------------------------------------------------------
 
@@ -142,7 +145,7 @@ actually happens when a step runs.
 Built-in actions include:
 
 - `ShellAction`: Runs a shell command.
-- `ToolActionBuilder`: Dynamically creates parameterized shell actions
+- `ShellActionBuilder`: Dynamically creates parameterized shell actions
   for common CLI tools.
 - You can also define your own custom actions.
 
@@ -228,6 +231,8 @@ Built-in condition helpers:
 - `scope_succeeding(scope)`: True if the given scope has no errors
 - `scope_status(scope, status...)`: True if the given scope status
   matches one of the provided statuses
+- `scope_condition(value, func=None, reason=None)`: Evaluate `value` as a
+  boolean, optionally transforming it using `func`.
 
 **Example:**
 
