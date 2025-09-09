@@ -193,6 +193,7 @@ class StubScope:
         self.type = type
         self.id = id or create_scope_id()
         self.concurrent = False
+        self.values = Values()
 
 
 class TestVerifyPythonTestStructure(TestCase):

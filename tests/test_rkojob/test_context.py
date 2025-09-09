@@ -374,6 +374,7 @@ class TestJobContextImpl(TestCase):
             type = StubScopeType.JOB
             id = "id"
             concurrent = False
+            values = Values()
 
         non_teardown_scope = NonTeardownScope()
         sut.push_scope(non_teardown_scope)
