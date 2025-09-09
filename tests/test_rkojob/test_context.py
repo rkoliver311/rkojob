@@ -16,7 +16,9 @@ from rkojob import (
     JobScopeStatus,
     Values,
     create_scope_id,
+    lazy_format,
 )
+from rkojob.coerce import as_bool, as_json_str
 from rkojob.context import (
     JobContextImpl,
     JobScopeStatuses,
@@ -30,6 +32,7 @@ from rkojob.events import (
     JobStartScopeEvent,
 )
 from rkojob.job import JobScopeIDMixin
+from rkojob.values import NoValueError
 from tests.test_rkojob.test_runner import StubGroupScope
 
 
@@ -211,6 +214,7 @@ class StubScope(JobScopeIDMixin):
             self.teardown += teardown
         self._id = id or create_scope_id()
         self.concurrent = False
+        self.values = Values()
 
     def __str__(self):
         return f"{self.type} {self.name}"
@@ -496,3 +500,78 @@ class TestJobContextImpl(TestCase):
     def test_str(self) -> None:
         sut = JobContextImpl()
         self.assertEqual(f"context({sut.id})", str(sut))
+
+    def test_get_value(self) -> None:
+        sut = JobContextImpl(values=dict(key="value"))
+        self.assertEqual("value", sut.get_value("key"))
+
+    def test_get_value_default(self) -> None:
+        sut = JobContextImpl(values=dict())
+        self.assertEqual("default", sut.get_value("key", default="default"))
+        sut.values.set("key", "value")
+        self.assertEqual("value", sut.get_value("key", default="default"))
+
+    def test_get_value_resolvable(self) -> None:
+        sut = JobContextImpl(values=dict(key=lazy_format("{k}", k="value")))
+        self.assertEqual("value", sut.get_value("key"))
+
+    def test_set_value(self) -> None:
+        sut = JobContextImpl(values=dict(key="value"))
+        self.assertEqual("value", sut.get_value("key"))
+        sut.set_value("key", "value2")
+        self.assertEqual("value2", sut.get_value("key"))
+
+    def test_get_value_raise(self) -> None:
+        sut = JobContextImpl()
+        with self.assertRaises(NoValueError) as e:
+            sut.get_value("key")
+        self.assertEqual("No context value found for key 'key'", str(e.exception))
+
+    def test_get_value_coerce(self) -> None:
+        sut = JobContextImpl(values=dict(key="True"))
+        self.assertTrue(sut.get_value("key", coercer=as_bool))
+
+    def test_get_value_coerce_to_json(self) -> None:
+        sut = JobContextImpl(values=dict(json={"key": "value"}))
+        self.assertEqual({"key": "value"}, sut.get_value("json"))
+        self.assertEqual('{"key": "value"}', sut.get_value("json", coercer=as_json_str))
+
+    def test_get_value_scopes(self) -> None:
+        sut = JobContextImpl(values={"job.key": "job_value", "key": "value"})
+        self.assertEqual("value", sut.get_value("key"))
+        with sut.events.scope(StubScope("job", StubScopeType.JOB)):
+            self.assertEqual("job_value", sut.get_value("key"))
+            self.assertEqual("job_value", sut.get_value("job.key"))
+            with sut.events.scope(StubScope("stage", StubScopeType.STAGE)):
+                self.assertEqual("job_value", sut.get_value("key"))
+
+                sut.set_value("job.stage.key", "stage_value")
+                self.assertEqual("stage_value", sut.get_value("key"))
+
+                self.assertEqual("job_value", sut.get_value("job.key"))
+
+            self.assertEqual("job_value", sut.get_value("key"))
+        self.assertEqual("value", sut.get_value("key"))
+
+    def test_get_value_scopes_raise(self) -> None:
+        sut = JobContextImpl()
+        with sut.events.scope(StubScope("job", StubScopeType.JOB)):
+            with sut.events.scope(StubScope("stage", StubScopeType.STAGE)):
+                with sut.events.scope(StubScope("step", StubScopeType.STEP)):
+                    with self.assertRaises(NoValueError) as e:
+                        sut.get_value("key")
+                    self.assertEqual(
+                        "No context value found for key 'key' "
+                        "(first tried: ['job.stage.step.key', 'job.stage.key', 'job.key']).",
+                        str(e.exception),
+                    )
+
+    def test_has_value(self) -> None:
+        sut = JobContextImpl(values={"key": "value", "job.stage.step.key2": "step_value"})
+        self.assertTrue(sut.has_value("key"))
+        self.assertFalse(sut.has_value("key2"))
+        with sut.events.scope(StubScope("job", StubScopeType.JOB)):
+            with sut.events.scope(StubScope("stage", StubScopeType.STAGE)):
+                with sut.events.scope(StubScope("step", StubScopeType.STEP)):
+                    self.assertTrue(sut.has_value("key"))
+                    self.assertTrue(sut.has_value("key2"))

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from typing import (
     Any,
+    Callable,
     Tuple,
+    cast,
 )
 
 from rkojob import (
@@ -27,8 +29,12 @@ from rkojob import (
     JobScopeStatus,
     JobStatus,
     JobTeardownScope,
+    T,
+    ValueKey,
+    ValueOrRef,
     Values,
     create_context_id,
+    resolve_value,
 )
 from rkojob.delegates import Delegate
 from rkojob.events import (
@@ -41,6 +47,7 @@ from rkojob.events import (
     JobStatusImpl,
 )
 from rkojob.factories import JobFuturesFactory
+from rkojob.values import NoValue, NoValueError, NoValueType
 
 
 class JobScopeStatuses(JobEventHandler):
@@ -412,6 +419,58 @@ class JobContextImpl(JobContext, JobEventHandler):
     @property
     def values(self) -> Values:
         return self._shared_state.values
+
+    def get_value(
+        self, key: ValueKey[T] | str, coercer: Callable[[Any], T] | None = None, default: T | NoValueType = NoValue
+    ) -> T:
+        value: Any = NoValue
+
+        # Try scope-prefixed keys first
+        keys: list[str] = self._get_scoped_keys(key)
+        for k in keys:
+            if self.values.has_value(k):
+                value = self.values.get(k)
+                break
+
+        if value is NoValue:
+            # No value was found using prefixed keys. Try the bare key.
+            if not self.values.has_value(key) and not isinstance(default, NoValueType):
+                # The context does not have the value but a
+                # default was provided. Set it and allow it to
+                # be looked up below.
+                self.set_value(key, default)
+
+            try:
+                value = self.values.get(key)
+            except NoValueError:
+                message: str = f"No context value found for key '{key}'"
+                if keys:
+                    message += f" (first tried: {keys})."
+                raise NoValueError(message)
+
+        value = resolve_value(value, context=self)
+
+        if coercer:
+            value = coercer(value)
+
+        return cast(T, value)
+
+    def has_value(self, key: ValueKey[T] | str) -> bool:
+        keys: list[str] = self._get_scoped_keys(key)
+        for k in keys:
+            if self.values.has_value(k):
+                return True
+        return self.values.has_value(key)
+
+    def _get_scoped_keys(self, key: ValueKey[T] | str) -> list[str]:
+        # Get the names of the current scopes
+        scopes: list[str] = [scope.name for scope in self.scopes]
+        # Generate a list of keys that we will try prefixed with the scopes (see docstring)
+        keys: list[str] = [f"{'.'.join(scopes[:i])}.{key}" for i in range(len(scopes), 0, -1)]
+        return keys
+
+    def set_value(self, key: ValueKey[T] | str, value: ValueOrRef[T]) -> None:
+        self.values.set(key, value)
 
     def __str__(self) -> str:
         return f"context({self.id})"
