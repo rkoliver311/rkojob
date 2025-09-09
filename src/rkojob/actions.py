@@ -16,6 +16,7 @@ from rkojob import (
     JobException,
     JobResolvableValue,
     assign_value,
+    job_workspace,
     resolve_map,
     resolve_value,
     resolve_values,
@@ -75,6 +76,15 @@ class ShellAction(JobAction):
     def action(self, context: JobContext) -> None:
         args: list[Any] = resolve_values(self._args, context=context)
         kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
+
+        if "cwd" not in kwargs:
+            # If cwd was not provided, default to job_workspace (if set)
+            workspace: Path | str | None = resolve_value(job_workspace, context=context)
+            if workspace is not None:
+                workspace_path: Path = Path(workspace).absolute()
+                if workspace_path is not None and workspace_path != Path.cwd():
+                    kwargs["cwd"] = workspace
+
         shell: Shell = Shell(**kwargs)
 
         command: str = shlex.join(args)

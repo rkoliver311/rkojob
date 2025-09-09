@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
 from enum import Enum, auto
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -585,6 +586,34 @@ class JobContext(Protocol):
          context.
         """
 
+    def get_value(
+        self, key: ValueKey[T] | str, coercer: Callable[[Any], T] | None = None, default: T | NoValueType = NoValue
+    ) -> T:
+        """
+        Get the value associated with the provided `key` from this context's values. If no value is present a
+        ``NoValueError`` is raised (not a ``KeyError``).
+
+        :param key: A `ValueKey` or `str` key.
+        :param coercer: An optional function to convert the raw value to the
+         expected type.
+        :param default: An optional default to use if no value is found; will
+         be set and returned.
+        :returns: A value of type `T`.
+        """
+
+    def has_value(self, key: ValueKey[T] | str) -> bool:
+        """
+        Check whether a value exists associated with the provided *key* in the context's values.
+        """
+
+    def set_value(self, key: ValueKey[T] | str, value: ValueOrRef[T]) -> None:
+        """
+        Sets or adds a `value` associated with the provided `key` to this context's values.
+
+        :param key: The key to associate the value with.
+        :param value: The value to add to this ``Values`` instance.
+        """
+
     @property
     def events(self) -> JobStatus:
         """
@@ -950,7 +979,7 @@ def resolve_value(
 
     if isinstance(value, JobCallable):
         # The value is JobCallable that takes a
-        # JobContext as a arg and returns a value.
+        # JobContext as an arg and returns a value.
         if context:
             return value(context)
         if raise_no_value:
@@ -1101,39 +1130,7 @@ class context_value(ValueKey[T]):
         self._default: T | NoValueType = default
 
     def __call__(self, context: JobContext) -> T:
-        value: Any = NoValue
-        # Get the names of the current scopes
-        scopes: list[str] = [scope.name for scope in context.scopes]
-        # Generate a list of keys that we will try prefixed with the scopes (see docstring)
-        keys: list[str] = [f"{'.'.join(scopes[:i])}.{self.name}" for i in range(len(scopes), 0, -1)]
-
-        # Try scope-prefixed keys first
-        for key in keys:
-            if context.values.has_value(key):
-                value = context.values.get(key)
-                break
-
-        if value is NoValue:
-            # No value was found using prefixed keys. Try the bare key.
-
-            if not context.values.has_value(self) and not isinstance(self._default, NoValueType):
-                # The context does not have the value but a
-                # default was provided. Set it and allow it to
-                # be looked up below.
-                self.set(context, self._default)
-
-            try:
-                value = context.values.get(self)
-            except NoValueError:
-                message: str = f"No context value found for key '{self}'"
-                if keys:
-                    message += f" (first tried: {keys})."
-                raise NoValueError(message)
-
-        if self._coercer:
-            value = self._coercer(value)
-
-        return cast(T, value)
+        return context.get_value(self.name, coercer=self._coercer, default=self._default)
 
     def set(self, context: JobContext, value: ValueOrRef[T]) -> None:
         """
@@ -1143,7 +1140,7 @@ class context_value(ValueKey[T]):
         :param context: The context to set the value for.
         :param value: The value to set in the context.
         """
-        context.values.set(self, value)
+        context.set_value(self.name, value)
 
     def __repr__(self) -> str:
         if self._coercer:
@@ -1156,6 +1153,10 @@ environment_variable: type[EnvironmentVariable] = EnvironmentVariable
 
 value_ref: type[ValueRef] = ValueRef
 """Convenience alias for a value held in a ValueRef"""
+
+
+job_workspace: context_value[Path | str] = context_value("workspace", default=".")
+"""Current job workspace. Defaults to `.`"""
 
 
 class job_scope:

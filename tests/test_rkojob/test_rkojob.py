@@ -3,17 +3,13 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 from enum import Enum, auto
-from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock
 
 from rkojob import (
     JobAction,
-    JobAssignableValue,
-    JobCallable,
     JobContext,
     JobException,
-    JobResolvableValue,
     JobScopeID,
     JobScopeStack,
     JobScopeStatus,
@@ -28,6 +24,7 @@ from rkojob import (
     job_never,
     job_scope,
     job_succeeding,
+    job_workspace,
     lazy_action,
     lazy_format,
     lazy_map_value,
@@ -41,9 +38,10 @@ from rkojob import (
     scope_succeeding,
     unassign_value,
 )
-from rkojob.coerce import as_bool, as_json_str
+from rkojob.coerce import as_path
+from rkojob.context import JobContextImpl
 from rkojob.factories import JobContextFactory
-from rkojob.values import ComputedValue, NoValueError, ValueRef, Values
+from rkojob.values import ComputedValue, NoValue, NoValueError, ValueRef, Values
 
 
 class TestJobException(TestCase):
@@ -263,102 +261,45 @@ class TestJobScopeStack(TestCase):
 
 class TestContextValue(TestCase):
     def test(self) -> None:
-        mock_context = MagicMock(values=Values(key="value"))
-        sut: JobResolvableValue[str] = context_value("key")
-        self.assertEqual("value", resolve_value(sut, context=mock_context))
+        mock_context = MagicMock()
+        resolve_value(context_value("key"), context=mock_context)
+        mock_context.get_value.assert_called_with("key", coercer=None, default=NoValue)
+
+    def test_coercer(self) -> None:
+        mock_context = MagicMock()
+        mock_coercer = MagicMock()
+        resolve_value(context_value("key", coercer=mock_coercer), context=mock_context)
+        mock_context.get_value.assert_called_with("key", coercer=mock_coercer, default=NoValue)
 
     def test_default(self) -> None:
-        mock_context = MagicMock(values=Values())
-        sut: JobResolvableValue[str] = context_value("key", default="default")
-        self.assertEqual("default", resolve_value(sut, context=mock_context))
-        self.assertEqual("default", mock_context.values.get("key"))
+        mock_context = MagicMock()
+        resolve_value(context_value("key", default="default"), context=mock_context)
+        mock_context.get_value.assert_called_with("key", coercer=None, default="default")
 
     def test_set(self) -> None:
-        mock_context = MagicMock(values=Values(key="value"))
-        sut: JobAssignableValue[str] = context_value("key")
-        assign_value(sut, "value2", context=mock_context)
-        self.assertEqual("value2", resolve_value(sut, context=mock_context))
-
-    def test_raise(self) -> None:
-        mock_context = MagicMock(values=Values())
-        sut: JobResolvableValue[str] = context_value("key")
-        with self.assertRaises(NoValueError) as e:
-            resolve_value(sut, context=mock_context, raise_no_value=True)
-        self.assertEqual("No context value found for key 'key'", str(e.exception))
-
-    def test_coerce(self) -> None:
-        mock_context = MagicMock(values=Values(key="True"))
-        sut: JobResolvableValue[bool] = context_value("key", coercer=as_bool)
-        self.assertTrue(resolve_value(sut, context=mock_context))
-
-    def test_callable(self) -> None:
-        mock_context = MagicMock(values=Values(key="True"))
-        sut: JobCallable[bool] = context_value("key", coercer=as_bool)
-        self.assertTrue(sut(mock_context))
-
-    def test_coerce_to_json(self) -> None:
-        mock_context = MagicMock(values=Values(**{"json": {"key": "value"}}))
-        sut: JobCallable[dict[str, Any]] = context_value("json")
-        self.assertEqual({"key": "value"}, sut(mock_context))
-        sut2: JobCallable[str] = context_value("json", coercer=as_json_str)
-        self.assertEqual('{"key": "value"}', sut2(mock_context))
+        mock_context = MagicMock()
+        context_value("key", default="default").set(mock_context, "value")
+        mock_context.set_value.assert_called_with("key", "value")
 
     def test_repr(self) -> None:
         self.assertEqual("context_value('key')", repr(context_value("key")))
-        self.assertEqual("context_value('key', as_bool)", repr(context_value("key", as_bool)))
 
-    def test_scopes(self) -> None:
-        sut: JobResolvableValue[str] = context_value("key")
+    def test_repr_with_coercer(self) -> None:
+        self.assertEqual("context_value('key', as_path)", repr(context_value("key", coercer=as_path)))
 
-        mock_context = MagicMock()
 
-        mock_context.scopes = (StubScope("job", 0),)
-        mock_context.values = Values(**{"job.key": "job_value", "key": "value"})
-        self.assertEqual("job_value", resolve_value(sut, context=mock_context))
+class TestJobWorkspace(TestCase):
+    def test(self) -> None:
+        self.assertEqual(".", resolve_value(job_workspace, context=JobContextImpl()))
 
-        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1))
-        self.assertEqual("job_value", resolve_value(sut, context=mock_context))
-
-        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
-        mock_context.values = Values(
-            **{
-                "job.key": "job_value",
-                "job.stage.key": "stage_value",
-                "job.stage.step.key": "step_value",
-                "key": "value",
-            }
-        )
-        self.assertEqual("step_value", resolve_value(sut, context=mock_context))
-
-        sut = context_value("job.stage.key")
-        self.assertEqual("stage_value", resolve_value(sut, context=mock_context))
-
-    def test_scopes_raise(self) -> None:
-        sut: JobResolvableValue[str] = context_value("key")
-
-        mock_context = MagicMock()
-        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
-        mock_context.values = Values()
-        with self.assertRaises(NoValueError) as e:
-            resolve_value(sut, context=mock_context, raise_no_value=True)
+    def test_override(self) -> None:
         self.assertEqual(
-            "No context value found for key 'key' "
-            "(first tried: ['job.stage.step.key', 'job.stage.key', 'job.key']).",
-            str(e.exception),
+            "workspace", resolve_value(job_workspace, context=JobContextImpl(values=dict(workspace="workspace")))
         )
-
-    def test_scopes_default(self) -> None:
-        sut: JobResolvableValue[str] = context_value("key", default="default")
-
-        mock_context = MagicMock()
-        mock_context.scopes = (StubScope("job", 0), StubScope("stage", 1), StubScope("step", 2))
-        mock_context.values = Values(
-            **{
-                "job.stage.key": "stage_value",
-            }
+        self.assertEqual(
+            as_path("workspace"),
+            resolve_value(job_workspace, context=JobContextImpl(values=dict(workspace=as_path("workspace")))),
         )
-        value = resolve_value(sut, context=mock_context, raise_no_value=True)
-        self.assertEqual("stage_value", value)
 
 
 class TestJobScope(TestCase):
@@ -496,15 +437,13 @@ class TestLazyFormat(TestCase):
     def test_with_context(self) -> None:
         ref2 = ValueRef("value2")
         sut = lazy_format("{ref.1}, {ref2}", ref2=ref2)
-        values: Values = Values()
-        values.set("ref.1", "value1")
-        self.assertEqual("value1, value2", resolve_value(sut, context=MagicMock(values=values)))
+        self.assertEqual("value1, value2", resolve_value(sut, context=JobContextImpl(values={"ref.1": "value1"})))
 
     def test_missing_key(self) -> None:
         ref2 = ValueRef("value2")
         sut = lazy_format("{ref1}, {ref2}", ref2=ref2)
         with self.assertRaises(NoValueError) as e:
-            _ = resolve_value(sut, context=MagicMock(values=Values()), raise_no_value=True)
+            _ = resolve_value(sut, context=JobContextImpl(), raise_no_value=True)
         self.assertEqual("No context value found for key 'ref1'", str(e.exception))
 
     def test_repr(self) -> None:

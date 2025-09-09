@@ -205,6 +205,11 @@ class TestGetRefValue(TestCase):
         self.assertEqual("default", get_ref_value(ValueRef(), default="default"))
 
 
+class TestValueKey(TestCase):
+    def test_str(self) -> None:
+        self.assertEqual("name", str(ValueKey("name")))
+
+
 class TestValues(TestCase):
     def test_has_value(self) -> None:
         sut = Values(int_ref=123, str_ref="abc")

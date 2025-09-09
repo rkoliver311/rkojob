@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from rkojob import JobContext, JobException, ValueRef, create_scope_id
+from rkojob import JobContext, JobException, NoValue, ValueRef, Values, create_scope_id
 from rkojob.actions import ShellAction, ShellActionBuilder, VerifyPythonTestStructure
 from rkojob.factories import JobContextFactory
 from rkojob.util import ShellException, ShellResult
@@ -20,6 +20,9 @@ class TestShellAction(TestCase):
         context = MagicMock(spec=JobContext)
         context.events.section = MagicMock()
         context.events.output = MagicMock()
+        context.values = Values()
+        context.get_value = lambda key, coercer=None, default=NoValue: context.values.get_or_else(key, default)
+
         return context
 
     @patch("rkojob.actions.Shell")
@@ -47,6 +50,16 @@ class TestShellAction(TestCase):
         expected_command = shlex.join(("echo", "ok")) + " (env={'VAR': 'value'})"
         context.events.section.assert_called_once_with(f"Executing {expected_command}")
         mock_shell_cls.assert_called_once_with(env={"VAR": "value"})
+        mock_shell_cls().assert_called_once_with("echo", "ok")
+
+    @patch("rkojob.actions.Shell")
+    def test_job_workspace(self, mock_shell_cls):
+        context = self.make_context()
+        context.values.set("workspace", "/some/path")
+
+        sut = ShellAction("echo", "ok")
+        sut.action(context)
+        mock_shell_cls.assert_called_once_with(cwd="/some/path")
         mock_shell_cls().assert_called_once_with("echo", "ok")
 
     @patch("rkojob.actions.Shell")
@@ -155,7 +168,7 @@ class TestShellActionBuilder(TestCase):
     def test(self, mock_shell_type) -> None:
         sut = ShellActionBuilder("tool").command.sub_command("-v", enable_feature=True, keyword_arg="value")
         self.assertIsInstance(sut, ShellAction)
-        sut.action(MagicMock())
+        sut.action(MagicMock(get_value=lambda key, coercer=None, default=None: None))
         mock_shell_type.assert_called_once_with(show_stdout=False, show_stderr=False)
         mock_shell_type().assert_called_once_with(
             "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
@@ -167,7 +180,7 @@ class TestShellActionBuilder(TestCase):
             "-v", enable_feature=True, keyword_arg="value"
         )
         self.assertIsInstance(sut, ShellAction)
-        sut.action(MagicMock())
+        sut.action(MagicMock(get_value=lambda key, coercer=None, default=None: None))
         mock_shell_type.assert_called_once_with(show_stdout=True, env={"var": "value"}, show_stderr=False)
         mock_shell_type().assert_called_once_with(
             "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
