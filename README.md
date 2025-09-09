@@ -101,6 +101,8 @@ docker_tag = context_value("docker.tag")
 docker_registry = context_value("docker.registry")
 ```
 
+See also: [Scoped Context Values](#scoped-context-values)
+
 ------------------------------------------------------------------------
 
 ## Core Concepts
@@ -142,7 +144,8 @@ actually happens when a step runs.
 
 Built-in actions include:
 
-- `ShellAction`: Runs a shell command.
+- `ShellAction`: Runs a shell command in the directory referenced by
+  `job_workspace`.
 - `ShellActionBuilder`: Dynamically creates parameterized shell actions
   for common CLI tools.
 - You can also define your own custom actions.
@@ -229,8 +232,8 @@ Built-in condition helpers:
 - `scope_succeeding(scope)`: True if the given scope has no errors
 - `scope_status(scope, status...)`: True if the given scope status
   matches one of the provided statuses
-- `scope_condition(value, func=None, reason=None)`: Evaluate `value` as a
-  boolean, optionally transforming it using `func`.
+- `scope_condition(value, func=None, reason=None)`: Evaluate `value` as
+  a boolean, optionally transforming it using `func`.
 
 **Example:**
 
@@ -280,11 +283,88 @@ url = lazy_format("https://{hostname}:{port}/{path}")
 
 # Access the current context (deferred)
 context = job_context
+
+# The current job workspace (defaults to .)
+workspace = job_workspace
 ```
 
 Deferred values must be resolved at execution time using
 `resolve_value`, `resolve_values`, `resolve_map`, etc. All built-in
 actions automatically resolve these values when they run.
+
+#### Scoped Context Values
+
+Context values can be associated with a *scope path* (e.g. 
+`job.stage.step.key`) to override values defined at broader scopes. When
+a value is resolved with `context_value("key")` or
+`JobContext.get_value("key")`, the most specific scoped value is
+returned.
+
+For example, values passed on the command line:
+
+    --value key=value --value job.stage.step2.key=scoped-value
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage") as stage:
+        with stage.step("step1") as step:
+            # Prints "value"
+            step.action = lambda ctx: print(ctx.get_value("key"))
+        with stage.step("step2") as step:
+            # Prints "scoped-value"
+            step.action = lambda ctx: print(ctx.get_value("key"))
+```
+
+Scoped values can also be provided directly in the job definition. This
+allows you to override context values programmatically:
+
+    --value key=value
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage") as stage:
+        with stage.step("step1") as step:
+            # Prints "value"
+            step.action = lambda ctx: print(ctx.get_value("key"))
+        with stage.step("step2") as step:
+            # Override within this scope
+            step.set_value("key", "scoped-value")
+            # Prints "scoped-value"
+            step.action = lambda ctx: print(ctx.get_value("key"))
+```
+
+##### Resolution Order
+
+When resolving a context value, the framework searches from the most
+specific scope outward:
+
+1.  `job.stage.step.key`
+2.  `job.stage.key`
+3.  `job.key`
+4.  `key`
+
+The first match found is returned.
+
+##### Precedence of Values
+
+When both a job definition and the command line provide a value for the
+same key, the command line takes precedence. This follows the common
+convention of treating runtime user input as the strongest signal of
+intent.
+
+For example:
+
+    --value job.stage.step.key=cli-value
+
+``` python
+with JobBuilder("job") as job:
+    with job.stage("stage") as stage:
+        with stage.step("step") as step:
+            # Definition-time default
+            step.set_value("key", "def-value")
+            # Will print "cli-value"
+            step.action = lambda ctx: print(ctx.get_value("key"))
+```
 
 ### Concurrent Scopes
 
