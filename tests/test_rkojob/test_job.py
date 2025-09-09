@@ -2,7 +2,7 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
+from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -17,9 +17,11 @@ from rkojob.factories import JobContextFactory
 from rkojob.job import (
     Job,
     JobBuilder,
+    JobBuilderBase,
     JobGroup,
     JobGroupBuilder,
     JobScopeIDMixin,
+    JobScopes,
     JobStage,
     JobStageBuilder,
     JobStageGroupBuilder,
@@ -219,6 +221,32 @@ class TestJob(TestCase):
 
     def test_str(self) -> None:
         self.assertEqual("Job name", str(Job("name")))
+
+
+class TestJobBuilderBase(TestCase):
+    def test_init_with_workspace(self) -> None:
+        class Impl(JobBuilderBase):
+            def build(self) -> Any:
+                pass
+
+        sut = Impl(name="name", builds_type=JobScopes.JOB, workspace="workspace")
+        self.assertEqual("workspace", sut.values.get("workspace"))
+
+    def test_set_value(self) -> None:
+        class Impl(JobBuilderBase):
+            def build(self) -> Any:
+                pass
+
+        sut = Impl(name="name", builds_type=JobScopes.JOB)
+        sut.set_value("key", "value")
+        self.assertEqual("value", sut.values.get("key"))
+
+    def test_str(self) -> None:
+        class Impl(JobBuilderBase):
+            def build(self) -> Any:
+                pass
+
+        self.assertEqual("Stage foo", str(Impl("foo", builds_type=JobScopes.STAGE)))
 
 
 class TestJobStepBuilder(TestCase):

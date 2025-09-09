@@ -689,6 +689,10 @@ class JobScope(JobScopeID, Protocol):
     def concurrent(self) -> bool:
         """:returns: Whether the scope should be executed concurrently."""
 
+    @property
+    def values(self) -> Values:
+        """:returns: Scoped values that will be added to the context."""
+
 
 @runtime_checkable
 class JobGroupScope(JobScope, Protocol):

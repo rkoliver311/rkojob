@@ -82,6 +82,10 @@ class JobRunnerImpl:
         # Run and then teardown a scope.
         # If the scope is a group, recursively run and teardown child scopes.
 
+        # Inject the scope's values first. These might be referenced in
+        # the run/skip conditions.
+        self._inject_scope_values(context, scope)
+
         should_skip: bool
         skip_reason: str
         should_skip, skip_reason = self._should_skip(context, scope)
@@ -95,6 +99,19 @@ class JobRunnerImpl:
             self._run_concurrent_scope(context, scope)
         else:
             self._real_run_scope(context, scope)
+
+    def _inject_scope_values(self, context: JobContext, scope: JobScope) -> None:
+        if not isinstance(scope, JobScope):
+            # In case a non-scope is passed in at runtime
+            return
+        prefix: str = ".".join([scope.name for scope in context.scopes])
+        prefix = f"{prefix}.{scope.name}" if prefix else scope.name
+        for key in scope.values.keys():
+            k: str = f"{prefix}.{key}"
+            if not context.values.has_value(k):
+                # Only inject value if it doesn't already exist
+                # For example, don't override values passed in via CLI
+                context.values.set(k, scope.values.get(key))
 
     def _run_concurrent_scope(self, context: JobContext, scope: JobScope) -> None:
         # Run a scope (and any child scopes) concurrently within the current scope.

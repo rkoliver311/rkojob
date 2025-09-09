@@ -17,14 +17,17 @@ from rkojob import (
     JobInterrupt,
     ValueKey,
     ValueRef,
+    Values,
+    context_value,
     create_scope_id,
     job_succeeding,
+    resolve_value,
     scope_failing,
     scope_succeeding,
 )
 from rkojob.delegates import Delegate
 from rkojob.factories import JobContextFactory
-from rkojob.job import JobScopeIDMixin
+from rkojob.job import JobBuilder, JobScopeIDMixin
 from rkojob.runner import JobRunnerImpl
 from rkojob.util import not_none
 
@@ -43,6 +46,7 @@ class StubScope:
             self.teardown += teardown
         self.id = id or create_scope_id()
         self.concurrent = concurrent
+        self.values = Values()
 
     def __str__(self):
         return f"{self.type} {self.name}"
@@ -624,3 +628,26 @@ class TestJobRunnerImpl(TestCase):
         sut.run(context, job)
 
         self.assertEqual(["Hello from the background!", "Hello from the foreground!"], side_effects)
+
+    def test_with_values(self) -> None:
+
+        side_effects: list[str | None] = []
+
+        def action(context: JobContext) -> None:
+            side_effects.append(resolve_value(context_value("foo"), context=context))
+
+        with JobBuilder("job") as job:
+            job.values.set("foo", "job_value")
+            with job.stage("stage") as stage:
+                stage.values.set("foo", "stage_value")
+                with stage.step("step") as step:
+                    step.values.set("foo", "step_value")
+                    step.action = action
+                with stage.step("other_step") as step:
+                    step.action = action
+            with job.step("job_step") as step:
+                step.action = action
+
+        JobRunnerImpl().run(JobContextFactory.create(), job.build())
+
+        self.assertEqual(["step_value", "stage_value", "job_value"], side_effects)
