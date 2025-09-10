@@ -29,6 +29,7 @@ from rkojob.util import (
     ShellResult,
     ToolBuilder,
     ToolRunner,
+    deep_flatten,
 )
 from rkojob.values import (
     ValueRef,
@@ -58,37 +59,50 @@ class ShellAction(JobAction):
         *args: Any,
         result: ValueRef[ShellResult] | None = None,
         on_error: ShellActionOnError | None = None,
+        prepare_func: Callable[[tuple[Any, ...], dict[str, Any]], list[str]] | None = None,
+        shell_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         """
-        :param args: Arguments to execute as a shell command.
+        :param args: Arguments to execute as a shell command or passed into prepare_func.
         :param result: An optional `ValueRef` to return the `ShellResult` in.
         :param on_error: On a non-zero return code, whether to raise an error, log an error, log a warning,
          or do nothing.
-        :param kwargs: Additional keyword args to pass to `Shell()`.
+        :param prepare_func: A function that takes the `args` and `kwargs`
+         params and returns the command args list to be executed.
+        :param shell_kwargs: Additional keyword args to pass to `Shell()`.
+        :param kwargs: Additional keyword args for prepare_func
         """
         super().__init__()
         self._args: tuple[Any, ...] = args
         self._kwargs: dict[str, Any] = kwargs
+        self._prepare_func: Callable[[tuple[Any, ...], dict[str, Any]], list[str]] | None = prepare_func
+        self._shell_kwargs: dict[str, Any] = shell_kwargs or {}
         self.result: ValueRef[ShellResult] = result or ValueRef(name="result")
         self._on_error: ShellActionOnError = on_error or ShellActionOnError.ERROR
 
     def action(self, context: JobContext) -> None:
         args: list[Any] = resolve_values(self._args, context=context)
-        kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
+        args = list(deep_flatten(args))
+        if self._prepare_func:
+            kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
+            args = self._prepare_func(*args, **kwargs)
+        args = [str(arg) for arg in args]
 
-        if "cwd" not in kwargs:
+        shell_kwargs: dict[str, Any] = resolve_map(self._shell_kwargs, context=context)
+
+        if "cwd" not in shell_kwargs:
             # If cwd was not provided, default to job_workspace (if set)
             workspace: Path | str | None = resolve_value(job_workspace, context=context)
             if workspace is not None:
                 workspace_path: Path = Path(workspace).absolute()
                 if workspace_path is not None and workspace_path != Path.cwd():
-                    kwargs["cwd"] = workspace
+                    shell_kwargs["cwd"] = workspace
 
-        shell: Shell = Shell(**kwargs)
+        shell: Shell = Shell(**shell_kwargs)
 
         command: str = shlex.join(args)
-        options: str = ", ".join(f"{key}={value}" for key, value in kwargs.items() if key in ("cwd", "env"))
+        options: str = ", ".join(f"{key}={value}" for key, value in shell_kwargs.items() if key in ("cwd", "env"))
         if options:
             command = f"{command} ({options})"
 
@@ -124,9 +138,9 @@ class ShellAction(JobAction):
         :param kwargs: Additional environment variables to set.
         :returns: This instance for call chaining.
         """
-        env: dict[str, Any] = self._kwargs.get("env", {})
+        env: dict[str, Any] = self._shell_kwargs.get("env", {})
         env.update(**kwargs)
-        self._kwargs["env"] = env
+        self._shell_kwargs["env"] = env
         return self
 
     def in_dir(self, cwd: JobResolvableValue[str | PathLike]) -> ShellAction:
@@ -136,7 +150,7 @@ class ShellAction(JobAction):
         :param cwd: The directory to execute the shell command.
         :returns: This instance for call chaining.
         """
-        self._kwargs["cwd"] = cwd
+        self._shell_kwargs["cwd"] = cwd
         return self
 
 
@@ -151,17 +165,21 @@ class ShellActionBuilder:
     def __init__(
         self,
         *parts: str,
+        on_error: ShellActionOnError | None = None,
         runner_type: type[ToolRunner] | None = None,
         tool_builder: ToolBuilder | None = None,
         **kwargs,
     ) -> None:
         """
         :param parts: CLI command and sub-commands to be executed.
+        :param on_error: On a non-zero return code, whether to raise an error, log an error, log a warning,
+         or do nothing.
         :param runner_type: The type of ``ToolRunner`` that will be used to
          prepare, but not execute, the command.
         :param tool_builder: Used internally for building sub-commands.
         :param kwargs: Additional keyword arguments to pass to ``ShellAction``.
         """
+        self._on_error: ShellActionOnError | None = on_error
         self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts, runner_type=runner_type)
         self._shell_kwargs: dict[str, Any] = kwargs
         # Default to not showing any output
@@ -169,11 +187,19 @@ class ShellActionBuilder:
         self._shell_kwargs.setdefault("show_stderr", False)
 
     def __getattr__(self, name: str):
-        return ShellActionBuilder(tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs)
+        return ShellActionBuilder(
+            tool_builder=self._tool_builder.__getattr__(name), on_error=self._on_error, **self._shell_kwargs
+        )
 
     def __call__(self, *args, **kwargs) -> ShellAction:
         # Return a ShellAction which will execute the actual command.
-        return ShellAction(*self._tool_builder.prepare(*args, **kwargs).command, **self._shell_kwargs)
+
+        def prepare_func(*a, **kw) -> list[str]:
+            return self._tool_builder.prepare(*a, **kw).command
+
+        return ShellAction(
+            *args, on_error=self._on_error, prepare_func=prepare_func, shell_kwargs=self._shell_kwargs, **kwargs
+        )
 
 
 class VerifyTestStructure(JobAction):
