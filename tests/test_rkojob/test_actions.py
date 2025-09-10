@@ -186,6 +186,18 @@ class TestShellActionBuilder(TestCase):
             "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg", "value"
         )
 
+    @patch("rkojob.actions.Shell")
+    def test_with_shell_kwargs_with_resolvable(self, mock_shell_type) -> None:
+        sut = ShellActionBuilder("tool", show_stdout=True, env={"var": "value"}).command.sub_command(
+            "-v", enable_feature=True, keyword_arg=ValueRef(True), keyword_arg2=ValueRef(False)
+        )
+        self.assertIsInstance(sut, ShellAction)
+        sut.action(MagicMock(get_value=lambda key, coercer=None, default=None: None))
+        mock_shell_type.assert_called_once_with(show_stdout=True, env={"var": "value"}, show_stderr=False)
+        mock_shell_type().assert_called_once_with(
+            "tool", "command", "sub-command", "-v", "--enable-feature", "--keyword-arg"
+        )
+
 
 class StubScope:
     def __init__(self, name, type, id=None):
