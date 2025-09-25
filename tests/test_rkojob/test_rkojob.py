@@ -287,6 +287,16 @@ class TestContextValue(TestCase):
     def test_repr_with_coercer(self) -> None:
         self.assertEqual("context_value('key', as_path)", repr(context_value("key", coercer=as_path)))
 
+    def test_map(self) -> None:
+        mock_context = MagicMock(get_value=lambda *args, **kwargs: "value")
+        sut = context_value("key", default="default").map(lambda x: x.upper())
+        self.assertEqual("VALUE", sut(mock_context))
+
+    def test_map_with_default(self) -> None:
+        context = JobContextImpl()
+        sut = context_value("key", default="default").map(lambda x: x.upper())
+        self.assertEqual("DEFAULT", sut(context))
+
 
 class TestJobWorkspace(TestCase):
     def test(self) -> None:

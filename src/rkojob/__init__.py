@@ -892,6 +892,7 @@ class JobScopeStack(Generic[K, V], Mapping[K, V]):
 R_co = TypeVar("R_co", covariant=True)
 T_co = TypeVar("T_co", covariant=True)
 T = TypeVar("T")
+U = TypeVar("U")
 
 
 @runtime_checkable
@@ -1145,6 +1146,12 @@ class context_value(ValueKey[T]):
         :param value: The value to set in the context.
         """
         context.set_value(self.name, value)
+
+    def map(self, func: Callable[[T], U]) -> JobCallable[U]:
+        def _wrapper(context: JobContext) -> U:
+            return func(self(context))
+
+        return _wrapper
 
     def __repr__(self) -> str:
         if self._coercer:

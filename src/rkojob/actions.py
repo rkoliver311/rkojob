@@ -29,6 +29,7 @@ from rkojob.util import (
     ShellResult,
     ToolBuilder,
     ToolRunner,
+    deep_flatten,
 )
 from rkojob.values import (
     ValueRef,
@@ -82,6 +83,7 @@ class ShellAction(JobAction):
 
     def action(self, context: JobContext) -> None:
         args: list[Any] = resolve_values(self._args, context=context)
+        args = list(deep_flatten(args))
         if self._prepare_func:
             kwargs: dict[str, Any] = resolve_map(self._kwargs, context=context)
             args = self._prepare_func(*args, **kwargs)
@@ -163,17 +165,21 @@ class ShellActionBuilder:
     def __init__(
         self,
         *parts: str,
+        on_error: ShellActionOnError | None = None,
         runner_type: type[ToolRunner] | None = None,
         tool_builder: ToolBuilder | None = None,
         **kwargs,
     ) -> None:
         """
         :param parts: CLI command and sub-commands to be executed.
+        :param on_error: On a non-zero return code, whether to raise an error, log an error, log a warning,
+         or do nothing.
         :param runner_type: The type of ``ToolRunner`` that will be used to
          prepare, but not execute, the command.
         :param tool_builder: Used internally for building sub-commands.
         :param kwargs: Additional keyword arguments to pass to ``ShellAction``.
         """
+        self._on_error: ShellActionOnError | None = on_error
         self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts, runner_type=runner_type)
         self._shell_kwargs: dict[str, Any] = kwargs
         # Default to not showing any output
@@ -181,7 +187,9 @@ class ShellActionBuilder:
         self._shell_kwargs.setdefault("show_stderr", False)
 
     def __getattr__(self, name: str):
-        return ShellActionBuilder(tool_builder=self._tool_builder.__getattr__(name), **self._shell_kwargs)
+        return ShellActionBuilder(
+            tool_builder=self._tool_builder.__getattr__(name), on_error=self._on_error, **self._shell_kwargs
+        )
 
     def __call__(self, *args, **kwargs) -> ShellAction:
         # Return a ShellAction which will execute the actual command.
@@ -189,7 +197,9 @@ class ShellActionBuilder:
         def prepare_func(*a, **kw) -> list[str]:
             return self._tool_builder.prepare(*a, **kw).command
 
-        return ShellAction(*args, prepare_func=prepare_func, shell_kwargs=self._shell_kwargs, **kwargs)
+        return ShellAction(
+            *args, on_error=self._on_error, prepare_func=prepare_func, shell_kwargs=self._shell_kwargs, **kwargs
+        )
 
 
 class VerifyTestStructure(JobAction):

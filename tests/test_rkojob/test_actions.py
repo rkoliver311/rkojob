@@ -162,6 +162,16 @@ class TestShellAction(TestCase):
         context.events.output.assert_not_called()
         self.assertFalse(result_ref.has_value)
 
+    @patch("rkojob.actions.Shell")
+    def test_arg_as_list(self, mock_shell_cls):
+        context = self.make_context()
+
+        args2_3_4 = ["arg2", "arg3", "arg4"]
+        sut = ShellAction("arg1", args2_3_4, "arg5")
+        sut.action(context)
+
+        mock_shell_cls().assert_called_once_with("arg1", "arg2", "arg3", "arg4", "arg5")
+
 
 class TestShellActionBuilder(TestCase):
     @patch("rkojob.actions.Shell")
