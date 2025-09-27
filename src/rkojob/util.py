@@ -5,14 +5,30 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import signal
 import subprocess
 import sys
+from dataclasses import dataclass
+from enum import Enum
+from functools import singledispatch
 from os import PathLike
+from pathlib import Path
 from threading import Thread
-from typing import IO, Any, Iterable, TextIO, Type, TypeVar
+from typing import (
+    IO,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    Mapping,
+    Sequence,
+    TextIO,
+    Type,
+    TypeVar,
+)
 
 
 class ShellResult:
@@ -251,18 +267,20 @@ class ToolBuilder:
 
     """
 
-    def __init__(self, *commands: str, runner_type: Type[ToolRunner] | None = None, shell: Shell | None = None):
+    def __init__(
+        self, *commands: str, runner_factory: Callable[..., ToolRunner] | None = None, shell: Shell | None = None
+    ):
         """
         :param commands: Optional initial command parts.
-        :param runner_type: Optional default `ToolRunner` type used to
-         prepare and execute the tool.
+        :param runner_factory: Optional `ToolRunner` factory to use prepare
+         and execute the tool.
         :param shell: Optional `Shell` instance to use instead of default.
         """
         self._commands: list[str] = list(commands)
         self._shell: Shell | None = shell
 
         self._builder_type: Type[ToolBuilder] = type(self)
-        self._runner_type: Type[ToolRunner] = runner_type or ToolRunner
+        self._runner_factory: Callable[..., ToolRunner] = runner_factory or ToolRunner
 
     def prepare(self, *args, **kwargs) -> ToolRunner:
         """
@@ -270,14 +288,170 @@ class ToolBuilder:
         :param args: Additional args to be passed into the command.
         :param kwargs: Additional kwargs to be passed into the command.
         """
-        return self._runner_type(self._commands, *args, **kwargs, shell=self._shell)
+        return self._runner_factory(self._commands, *args, **kwargs, shell=self._shell)
 
     def __getattr__(self, name: str):
-        return self._builder_type(*self._commands, name, runner_type=self._runner_type, shell=self._shell)
+        return self._builder_type(*self._commands, name, runner_factory=self._runner_factory, shell=self._shell)
 
     def __call__(self, *args: Any, **kwargs) -> ShellResult:
         runner: ToolRunner = self.prepare(*args, **kwargs)
         return runner()
+
+
+ArgsRenderer = Callable[[Any], list[str]]
+KwArgsRenderer = Callable[[str, Any], list[str]]
+KeyRenderer = Callable[[str], str]
+ValueRenderer = Callable[[Any], list[str]]
+
+
+@singledispatch
+def render_value(v: Any) -> list[str]:
+    # Default: str() it
+    return [str(v)]
+
+
+@render_value.register(type(None))
+def _render_none(_: None) -> list[str]:
+    return []
+
+
+@render_value.register(bool)
+def _render_bool(v: bool) -> list[str]:
+    # Typically we'll just key off of whether
+    # the list is empty or not but include a
+    # meaningful value anyway.
+    return ["true"] if v else []
+
+
+@render_value.register(Path)
+def _render_path(p: Path) -> list[str]:
+    return [str(p)]
+
+
+@render_value.register(list)
+@render_value.register(tuple)
+def _render_list(seq: Sequence[Any]) -> list[str]:
+    out: list[str] = []
+    for x in seq:
+        out.extend(render_value(x))
+    return out
+
+
+@render_value.register(dict)
+def _render_dict(d: dict[Any, Any]) -> list[str]:
+    # Omit keys with values that are None
+    return [f"{key}={value}" for key, value in d.items() if value is not None]
+
+
+# Enums → value or name
+@render_value.register(Enum)
+def _render_enum(e: Enum) -> list[str]:
+    return [str(e.value)]
+
+
+def default_value_render(value: Any) -> list[str]:
+    return render_value(value)
+
+
+def csv_value_render(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [",".join(value)]
+    return default_value_render(value)
+
+
+def default_flag_render(key: str) -> str:
+    if key.startswith("-"):
+        return key
+    if len(key) == 1:
+        return f"-{key}"
+    return f"--{to_kebab(key)}"
+
+
+OptionStyle = Literal["auto", "flag_and_value", "flag_only", "flag_only_negate", "value_only"]
+"""
+auto:
+  If value is `True`, `False`, or `None`, act like `FLAG_ONLY`. Otherwise act like `FLAG_AND_VALUE`.
+
+flag_and_value:
+  `--option-name value` Repeatable options can be achieved by rendering values as a list.
+
+flag_only: `--option-name` if value is True
+
+flag_only_negate: `--option-name` if value is False
+
+value_only: `value` (positional)
+"""
+
+
+class OptionRenderer:
+    def __init__(
+        self,
+        style: OptionStyle = "auto",
+        flag_value_separator: str | None = None,
+        flag_renderer: KeyRenderer = default_flag_render,
+        value_renderer: ValueRenderer = default_value_render,
+    ) -> None:
+        self.style: OptionStyle = style
+        self.flag_value_separator: str | None = flag_value_separator
+        self.flag_renderer: KeyRenderer = flag_renderer
+        self.value_render: ValueRenderer = value_renderer
+
+    def __call__(self, key: str, value: Any) -> list[str]:
+        return self.render(key, value)
+
+    def render(self, key: str, value: Any) -> list[str]:
+        style: OptionStyle = self.style
+        if style == "auto":
+            if value is None or value is True or value is False:
+                style = "flag_only"
+            else:
+                style = "flag_and_value"
+
+        flag: str = self.flag_renderer(key)
+        rendered_value: list[str] = self.value_render(value)
+
+        match style:
+            case "flag_and_value":
+                if self.flag_value_separator is None:
+                    out: list[str] = []
+                    for v in rendered_value:
+                        out.append(flag)
+                        out.append(v)
+                    return out
+                else:
+                    return [f"{flag}{self.flag_value_separator}{v}" for v in rendered_value]
+
+            case "flag_only":
+                if rendered_value:
+                    return [flag]
+                else:
+                    return []
+
+            case "flag_only_negate":
+                if rendered_value:
+                    return []
+                else:
+                    return [flag]
+
+            case "value_only":
+                return rendered_value
+
+            case _:
+                raise ValueError(f"Unknown style type: {self.style!r}")
+
+
+@dataclass
+class ToolRunnerConfig:
+    args_renderer: ArgsRenderer
+    kwarg_renderers: Mapping[str, KwArgsRenderer]
+    default_kwarg_renderer: KwArgsRenderer
+
+
+DEFAULT_TOOL_RUNNER_CONFIG = ToolRunnerConfig(
+    args_renderer=default_value_render,
+    kwarg_renderers={},
+    default_kwarg_renderer=OptionRenderer(),
+)
 
 
 class ToolRunner:
@@ -309,16 +483,56 @@ class ToolRunner:
         - `Shell`: Responsible for actual subprocess execution
     """
 
-    def __init__(self, commands: list[str], *args, shell: Shell | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        commands: list[str],
+        *args,
+        shell: Shell | None = None,
+        config: ToolRunnerConfig | None = None,
+        **kwargs,
+    ) -> None:
+        """
+        Create a new `ToolRunner` instance. An instance is typically created
+        by a `ToolBuilder` instance.
+
+        :param commands: Command(s) for the runner.
+        :param args: Positional arguments to the command(s).
+        :param shell: Optional `Shell` instance used to run the command.
+        :param config: Optional `ToolRunnerConfig` used to influence how
+         options rendered for execution.
+        :param kwargs:
+        """
         self._commands: list[str] = commands
         self._args: list[Any] = list(args)
         self._kwargs: dict[str, Any] = kwargs
         self._shell: Shell = shell or Shell()
 
+        self._config: ToolRunnerConfig = config or DEFAULT_TOOL_RUNNER_CONFIG
+
         self._env: dict[str, str] | None = None
         self._cwd: str | PathLike | None = None
 
-    def __call__(self, *args, **kwargs) -> ShellResult:
+    @classmethod
+    def factory(
+        cls,
+        args_renderer: ArgsRenderer | None = None,
+        kwarg_renderers: Mapping[str, KwArgsRenderer] | None = None,
+        default_kwarg_renderer: KwArgsRenderer | None = None,
+        config: ToolRunnerConfig | None = None,
+    ) -> Callable[..., ToolRunner]:
+        if config is None:
+            config = ToolRunnerConfig(
+                args_renderer=args_renderer or default_value_render,
+                kwarg_renderers=kwarg_renderers or {},
+                default_kwarg_renderer=default_kwarg_renderer or OptionRenderer(),
+            )
+        return functools.partial(ToolRunner, config=config)
+
+    def __call__(self, *_, **kwargs) -> ShellResult:
+        """
+        Run the command represented by this `ToolRunner`
+        :param kwargs: Additional kwargs to pass into the runner's `shell`.
+        """
         if self._env:
             kwargs.update(env=self._env)
         if self._cwd:
@@ -327,61 +541,46 @@ class ToolRunner:
 
     @property
     def command(self) -> list[Any]:
+        """:returns: The rendered command to be run."""
         return self._fixup_commands(self._commands) + self._fixup_args(self._args) + self._fixup_kwargs(self._kwargs)
 
     def with_env(self, **kwargs) -> ToolRunner:
+        """
+        Run the command with the provided environment variables.
+        This method can be called multiple times to build up
+        the map of environment variables.
+        :param kwargs: The environment variables to add to the runner's
+         environment.
+        """
         if self._env is None:
             self._env = {}
         self._env.update(**kwargs)
         return self
 
     def in_dir(self, cwd: str | PathLike) -> ToolRunner:
+        """
+        Run the command in the provided directory.
+        :param cwd: The directory to run the command in.
+        """
         self._cwd = cwd
         return self
 
-    @classmethod
-    def _fixup_commands(cls, parts: list[str]) -> list[str]:
+    def _fixup_commands(self, parts: list[str]) -> list[str]:
         return [part.replace("_", "-") for part in parts]
 
-    @classmethod
-    def _fixup_args(cls, args: Iterable[Any]) -> list[Any]:
-        fixed_up: list[Any] = []
-        for arg in args:
-            if arg is None:
-                continue
-            if isinstance(arg, (list, tuple)):
-                fixed_up.extend(cls._fixup_args(arg))
-            else:
-                fixed_up.append(cls._fixup_arg(arg))
-        return fixed_up
+    def _fixup_args(self, args: Iterable[Any]) -> list[str]:
+        out: list[str] = []
+        for a in args:
+            if a:
+                out.extend(self._config.args_renderer(a))
+        return out
 
-    @classmethod
-    def _fixup_arg(cls, arg: Any) -> Any:
-        return arg
-
-    @classmethod
-    def _fixup_kwargs(cls, kwargs: dict[str, Any]) -> list[Any]:
-        fixed_up: list[Any] = []
-
-        for key, arg in kwargs.items():
-            if arg is None or arg is False:
-                continue
-            fixed_up.append(cls._fixup_key(key))
-
-            if isinstance(arg, (list, tuple)):
-                fixed_up.extend(ToolRunner._fixup_args(arg))
-            elif arg is not True:
-                fixed_up.append(arg)
-
-        return fixed_up
-
-    @classmethod
-    def _fixup_key(cls, key: str) -> str:
-        if key.startswith("-"):
-            return key
-        if len(key) == 1:
-            return f"-{key}"
-        return f"--{to_kebab(key)}"
+    def _fixup_kwargs(self, kwargs: dict[str, Any]) -> list[str]:
+        out: list[str] = []
+        for k, v in kwargs.items():  # insertion-order stable
+            renderer: KwArgsRenderer = self._config.kwarg_renderers.get(k, self._config.default_kwarg_renderer)
+            out.extend(renderer(k, v))
+        return out
 
 
 def deep_flatten(xs: Iterable[Any]) -> Iterable[Any]:
