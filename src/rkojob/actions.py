@@ -166,7 +166,7 @@ class ShellActionBuilder:
         self,
         *parts: str,
         on_error: ShellActionOnError | None = None,
-        runner_type: type[ToolRunner] | None = None,
+        runner_factory: Callable[..., ToolRunner] | None = None,
         tool_builder: ToolBuilder | None = None,
         **kwargs,
     ) -> None:
@@ -174,13 +174,13 @@ class ShellActionBuilder:
         :param parts: CLI command and sub-commands to be executed.
         :param on_error: On a non-zero return code, whether to raise an error, log an error, log a warning,
          or do nothing.
-        :param runner_type: The type of ``ToolRunner`` that will be used to
+        :param runner_factory: An optional ``ToolRunner`` factory that will be used to
          prepare, but not execute, the command.
         :param tool_builder: Used internally for building sub-commands.
         :param kwargs: Additional keyword arguments to pass to ``ShellAction``.
         """
         self._on_error: ShellActionOnError | None = on_error
-        self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts, runner_type=runner_type)
+        self._tool_builder: ToolBuilder = tool_builder or ToolBuilder(*parts, runner_factory=runner_factory)
         self._shell_kwargs: dict[str, Any] = kwargs
         # Default to not showing any output
         self._shell_kwargs.setdefault("show_stdout", False)
