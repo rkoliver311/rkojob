@@ -26,7 +26,8 @@ from rkojob import (
     scope_succeeding,
 )
 from rkojob.delegates import Delegate
-from rkojob.factories import JobContextFactory
+from rkojob.factories import JobContextFactory, JobHooksFactory
+from rkojob.hooks import JobHook
 from rkojob.job import JobBuilder, JobScopeIDMixin
 from rkojob.runner import JobRunnerImpl
 from rkojob.util import not_none
@@ -651,3 +652,42 @@ class TestJobRunnerImpl(TestCase):
         JobRunnerImpl().run(JobContextFactory.create(), job.build())
 
         self.assertEqual(["step_value", "stage_value", "job_value"], side_effects)
+
+    def test_hooks(self) -> None:
+        side_effects: list[str] = []
+        job = self._create_job(side_effects)
+        hooks = JobHooksFactory.create()
+        hooks.register(
+            "job/stage?/step?.2",
+            JobHook(before=lambda _: StubActionScope("before", StubScopeType.STEP, action=self._action(side_effects))),
+        )
+        hooks.register(
+            "job/stage?/step?.1",
+            JobHook(after=lambda _: StubActionScope("after", StubScopeType.STEP, action=self._action(side_effects))),
+        )
+        context = JobContextFactory.create(hooks=hooks)
+        JobRunnerImpl().run(context, job)
+
+        self.assertEqual(
+            [
+                "Action: job->stage1->step1.1",
+                "Action: job->stage1->step1.1->after",
+                "Action: job->stage1->step1.2->before",
+                "Action: job->stage1->step1.2",
+                "Action: job->stage2->step2.1",
+                "Action: job->stage2->step2.1->after",
+                "Action: job->stage2->step2.2->before",
+                "Action: job->stage2->step2.2",
+                "Teardown stage2: step2.2",
+                "Teardown stage2: step2.1",
+                "Action: job->stage3->step3.1",
+                "Action: job->stage3->step3.1->after",
+                "Action: job->stage3->step3.2->before",
+                "Action: job->stage3->step3.2",
+                "Teardown job: step3.2",
+                "Teardown job: step3.1",
+                "Teardown job: step1.2",
+                "Teardown job: step1.1",
+            ],
+            side_effects,
+        )

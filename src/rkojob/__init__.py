@@ -538,6 +538,16 @@ class JobContext(Protocol):
         :returns: A `Delegate` instance that will invoke the teardown actions.
         """
 
+    def get_before_hooks(self) -> list[JobScope]:
+        """
+        Get a list of `JobScope`'s that should be executed *before* the current scope.
+        """
+
+    def get_after_hooks(self) -> list[JobScope]:
+        """
+        Get a list of `JobScope`'s that should be executed *after* the current scope.
+        """
+
     def get_futures(self, scope: JobScopeID) -> JobFutures:
         """
         Gets the ``JobFutures`` instance that can be used to execute concurrent
@@ -649,6 +659,10 @@ def create_scope_id() -> JobIdType:
     Creates a new, unique scope ID value.
     """
     return JobIdType(uuid4())
+
+
+def get_scope_path(*scopes: JobScope, sep: str = ".") -> str:
+    return sep.join([scope.name for scope in scopes])
 
 
 @runtime_checkable
@@ -1406,6 +1420,41 @@ class JobRunner(Protocol):
     """
 
     def run(self, context: JobContext, scope: JobScope) -> None: ...
+
+
+class JobHook:
+    def __init__(
+        self,
+        before: JobResolvableValue[JobScope | None] | None = None,
+        after: JobResolvableValue[JobScope | None] | None = None,
+    ) -> None:
+        self._before: JobResolvableValue[JobScope | None] | None = before
+        self._after: JobResolvableValue[JobScope | None] | None = after
+
+    def get_before(self, context: JobContext) -> JobScope | None:
+        return resolve_value(self._before, context=context)
+
+    def get_after(self, context: JobContext) -> JobScope | None:
+        return resolve_value(self._after, context=context)
+
+
+class JobHooks(Protocol):
+    """
+    A protocol for a hooks registry that allows for registering hooks at
+    runtime to be executed before or after a previously defined scope.
+    """
+
+    def register(self, path_spec: str, hook: JobHook) -> None:
+        """
+        Register a hook to be run based on a scope path spec. For example,
+        `job.*` would run the hook for every child scope of `job` and
+        `job.stage1.step2` would run the hook for `job.stage1.step2` only.
+        """
+
+    def get_hooks(self, path: str) -> list[JobHook]:
+        """
+        Get the hooks registered for the provided scope path.
+        """
 
 
 class job_action(JobAction, Generic[P, R]):

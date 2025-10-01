@@ -3,7 +3,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-from rkojob import JobContext, JobFutures, JobRunner
+from rkojob import JobContext, JobFutures, JobHooks, JobRunner
 
 
 class JobContextFactory:
@@ -11,7 +11,7 @@ class JobContextFactory:
     def create(cls, *args, **kwargs) -> JobContext:
         from rkojob.context import JobContextImpl
 
-        return JobContextImpl(events=kwargs.get("events"), values=kwargs.get("values"))
+        return JobContextImpl(events=kwargs.get("events"), values=kwargs.get("values"), hooks=kwargs.get("hooks"))
 
 
 class JobRunnerFactory:
@@ -20,6 +20,14 @@ class JobRunnerFactory:
         from rkojob.runner import JobRunnerImpl
 
         return JobRunnerImpl()
+
+
+class JobHooksFactory:
+    @classmethod
+    def create(cls, *args, **kwargs) -> JobHooks:
+        from rkojob.hooks import JobHooksImpl
+
+        return JobHooksImpl()
 
 
 class JobFuturesFactory:
