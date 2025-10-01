@@ -42,6 +42,9 @@ from rkojob.values import ComputedValue
 pip = ShellActionBuilder("pip")
 cat = ShellActionBuilder("cat")
 
+server = ShellActionBuilder("scripts/server.sh")
+ci = ShellActionBuilder("scripts/ci.sh")
+
 def path_exists(path: str) -> ComputedValue[bool]:
     return ComputedValue(lambda: Path(path).exists())
 
@@ -52,7 +55,7 @@ with JobBuilder("build-test-deploy") as job_builder:
 
     with job_builder.stage("build") as build:
         with build.step("build") as step:
-            step.action = ShellAction("scripts/build.sh")
+            step.action = ci.build()
 
         with build.step("log-errors") as step:
             step.action = cat("build/errors.log")
@@ -60,11 +63,11 @@ with JobBuilder("build-test-deploy") as job_builder:
 
     with job_builder.stage("test") as test:
         with test.step("start-test-server") as step:
-            step.action = ShellAction("scripts/server.sh", "start")
-            test.teardown += ShellAction("scripts/server.sh", "stop")
+            step.action = server.start()
+            test.teardown += server.stop()
 
         with test.step("test") as step:
-            step.action = ShellAction("scripts/test.sh")
+            step.action = ci.test()
 
         with test.step("log-errors") as step:
             step.action = cat("test/errors.log")
@@ -72,7 +75,7 @@ with JobBuilder("build-test-deploy") as job_builder:
 
     with job_builder.stage("deploy") as deploy:
         with deploy.step("deploy") as step:
-            step.action = ShellAction("scripts/deploy.sh")
+            step.action = ci.deploy()
             step.skip_if = context_value("dry_run", as_bool)
 
 job = job_builder.build()
@@ -258,6 +261,120 @@ If both are set:
 
 - The scope must pass `run_if`
 - Then, it must not be blocked by `skip_if`
+
+### Custom Hooks
+
+When common job definitions are shared across projects, **custom scope
+hooks** let you inject project-specific steps or stages into a shared
+job. A hook payload is itself a `JobScope`. It can be a **single step**,
+a **multi-step stage**, or even a **group of multiple stages**.
+
+#### Behavior of hook scopes
+
+Hook scopes behave exactly like **normal child scopes** once injected
+and support all the same features as pre-defined scopes, including:
+
+- **Conditions**: `run_if` / `skip_if` apply normally to injected
+  scopes.
+- **Concurrency**: concurrent stages/steps can be injected and will run
+  in parallel.
+- **Teardown**: injected scopes trigger their own teardown logic and
+  integrate with parent teardown.
+- **Error handling**: failures propagate up through parents.
+- **Events and logging**: hook scopes emit the same events, log entries,
+  and metrics as any other scope.
+- **Nesting**: a hook payload can itself define groups, stages, and
+  steps, nesting as deeply as you like.
+
+> In short: once a scope is injected via a hook, the runner treats it no
+> differently than a pre-defined scope.
+
+#### Registering Hooks
+
+Hooks are registered with a `JobHooks` instance by **path**
+(forward-slash-separated scope path) and a `JobHook` value:
+
+- **Path** targets the scopes where the hook should attach.
+- **`JobHook`** specifies what to inject `before` and/or `after` each
+  matched scope. Each side accepts a `JobResolvableValue[JobScope]`
+  which means it can be either:
+  - a **concrete `JobScope`** (used once), or
+  - a **`ValueProvider[JobScope]`** that provides a `JobScope`, or
+  - a **factory** `JobCallable[JobScope]`
+
+See `rkojob.resolve_value` for a complete list of types that can be
+resolved.
+
+Projects typically expose a `register_hooks(hooks: JobHooks)` function
+in a module passed via `--hooks-module`, and the runner calls it during
+startup.
+
+Hook scopes are run in the order that they are registered.
+
+#### Minimal example: inject a `srcgen` step before the `build` stage
+
+``` python
+# custom_hooks.py
+
+from rkojob import JobHook, JobHooks
+from rkojob.job import JobStep
+from rkojob.actions import ShellActionBuilder
+
+srcgen = ShellActionBuilder("srcgen")
+srcgen_step = JobStep("generate-sources", action=srcgen.generate())
+
+def register_hooks(hooks: JobHooks) -> None:
+    # Inject once, before build-and-test/build
+    hooks.register("build-and-test/build", JobHook(before=srcgen_step))
+```
+
+Run with:
+
+    rkojob run --job jobs.build_and_test --hooks-module custom_hooks
+
+#### Scope path glob patterns
+
+A glob-style pattern can be used to register a hook:
+
+``` python
+# Run for every stage of `build-and-test`
+hooks.register("build-and-test/*", JobHook(before=...))
+
+# Run for every scope (group, stage, or step) under the job whose name starts with "log"
+hooks.register("build-and-test/**/log*", JobHook(after=...))
+```
+
+> ⚠️ **Note:** Factory required for multi-match
+
+If a hook can match multiple scopes (via `*` or `**`), pass a factory so
+each injection gets a fresh `JobScope` instance.
+
+``` python
+from rkojob import JobContext, job_context, JobHook, JobHooks, JobScope
+from rkojob.job import JobStep
+from rkojob.actions import ShellActionBuilder
+
+logger = ShellActionBuilder("logger")
+
+def pre_stage(_: JobContext) -> JobScope:
+    return JobStep(
+        "pre-stage-logging",
+        action=logger.log(job_context.map(lambda ctx: f"{ctx.scope} starting."))
+    )
+
+def post_stage(_: JobContext) -> JobScope:
+    return JobStep(
+        "post-stage-logging",
+        action=logger.log(job_context.map(lambda ctx: f"{ctx.scope} complete."))
+    )
+
+def register_hooks(hooks: JobHooks) -> None:
+    hooks.register("*/*", JobHook(before=pre_stage, after=post_stage))
+```
+
+Because a `JobContext` is provided when the hook is created, one could
+do some interesting things with dynamic hooks based on the current
+context, if one were so inclined.
 
 ### Deferred Evaluation
 

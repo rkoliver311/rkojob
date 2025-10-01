@@ -32,6 +32,7 @@ class TestCli(TestCase):
         self.assertEqual(args.job, "pkg.mod.job")
         self.assertEqual(args.values, [])  # default
         self.assertIsNone(args.values_from)
+        self.assertIsNone(args.hooks_module)
 
     def test_parse_args_all_options(self) -> None:
         argv = [
@@ -44,11 +45,13 @@ class TestCli(TestCase):
             "b=two",
             "--values-from",
             "vals.yml",
+            "--hooks-module",
+            "some.module.my_hooks",
         ]
         args = self.sut.parse_args(argv)
         self.assertEqual(
-            (args.command, args.job, args.values, args.values_from),
-            ("run", "some.module.my_job", ["a=1", "b=two"], "vals.yml"),
+            (args.command, args.job, args.values, args.values_from, args.hooks_module),
+            ("run", "some.module.my_job", ["a=1", "b=two"], "vals.yml", "some.module.my_hooks"),
         )
 
     def test_split_module_and_job(self) -> None:

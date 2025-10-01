@@ -2,7 +2,6 @@
 #
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
-
 from typing import Any, cast
 
 import yaml
@@ -21,6 +20,7 @@ from rkojob import (
     JobScope,
     JobScopeID,
     JobTeardownScope,
+    get_scope_path,
     job_failing,
     job_never,
     resolve_value,
@@ -104,8 +104,9 @@ class JobRunnerImpl:
         if not isinstance(scope, JobScope):
             # In case a non-scope is passed in at runtime
             return
-        prefix: str = ".".join([scope.name for scope in context.scopes])
-        prefix = f"{prefix}.{scope.name}" if prefix else scope.name
+
+        # Context values use a dot as a separator
+        prefix: str = get_scope_path(*(*context.scopes, scope), sep=".")
         for key in scope.values.keys():
             k: str = f"{prefix}.{key}"
             if not context.values.has_value(k):
@@ -167,11 +168,19 @@ class JobRunnerImpl:
             raise self._unknown_scope(context, scope)
 
         with context.events.scope(scope):
+
             try:
+                for before_hook in context.get_before_hooks():
+                    self._run_scope(context, before_hook)
+
                 if group:
                     self._run_group(context, group)
                 elif action:
                     self._run_action(context, action)
+
+                for after_hook in context.get_after_hooks():
+                    self._run_scope(context, after_hook)
+
             finally:
                 if group:
                     # If this is a group scope, wait for any concurrent child scopes.

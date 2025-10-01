@@ -12,9 +12,9 @@ from typing import Any, Final
 
 import yaml
 
-from rkojob import JobEventDispatcher, JobException, JobScope
+from rkojob import JobEventDispatcher, JobException, JobHooks, JobScope
 from rkojob.events import JobDirectEventDispatcher
-from rkojob.factories import JobContextFactory, JobRunnerFactory
+from rkojob.factories import JobContextFactory, JobHooksFactory, JobRunnerFactory
 from rkojob.writer import JobStatusWriter
 
 
@@ -22,7 +22,10 @@ class Cli:
 
     RUN_COMMAND: Final[str] = "run"
 
-    JOB_ARGS: Final[tuple[str, str]] = ("--job", "-j")
+    JOB_ARGS: Final[tuple[str, ...]] = ("--job", "-j")
+    VALUE_ARGS: Final[tuple[str, ...]] = ("--value", "-v")
+    VALUES_FROM_ARGS: Final[tuple[str, ...]] = ("--values-from",)
+    HOOKS_MODULE_ARGS: Final[tuple[str, ...]] = ("--hooks-module",)
 
     def main(self, argv: list[str]) -> int:  # pragma: no cover
         try:
@@ -48,9 +51,14 @@ class Cli:
         # run
         run_parser = subparsers.add_parser(self.RUN_COMMAND, help="Execute a job definition.")
         run_parser.add_argument(*self.JOB_ARGS, type=str, required=True, help="The name of the job definition to run.")
-        run_parser.add_argument("--value", "-v", action="append", dest="values", default=[])
+        run_parser.add_argument(*self.VALUE_ARGS, action="append", dest="values", default=[])
         run_parser.add_argument(
-            "--values-from", type=str, help="Path to a file containing key=value pairs to add to the context's values."
+            *self.VALUES_FROM_ARGS,
+            type=str,
+            help="Path to a file containing key=value pairs to add to the context's values.",
+        )
+        run_parser.add_argument(
+            *self.HOOKS_MODULE_ARGS, type=str, help="The name of the module that will register custom hooks."
         )
 
         return parser
@@ -62,13 +70,14 @@ class Cli:
     def run_job(self, args: Namespace) -> int:  # pragma: no cover
         job: JobScope = self.get_job(args.job)
         values: dict[str, Any] = self.read_values(args)
+        hooks: JobHooks = self.get_hooks(args.hooks_module)
 
         try:
             events: JobEventDispatcher = self.get_event_dispatcher()
             status_writer: JobStatusWriter = self.get_status_writer()
             events.add_handler(status_writer)
 
-            context = JobContextFactory.create(events=events, values=values)
+            context = JobContextFactory.create(events=events, values=values, hooks=hooks)
             JobRunnerFactory.create().run(context, job)
             return self.success()
         except Exception as e:
@@ -109,16 +118,16 @@ class Cli:
             result[k] = v
         return result
 
-    def get_job_module(self, name: str) -> ModuleType:  # pragma: no cover
+    def get_module(self, name: str) -> ModuleType:  # pragma: no cover
         try:
             return importlib.import_module(name)
         except ModuleNotFoundError as e:
-            raise ModuleNotFoundError(f"Job module not found: {name}") from e
+            raise ModuleNotFoundError(f"Module not found: {name}") from e
 
     def get_job(self, job_name: str) -> JobScope:  # pragma: no cover
         module_name: str
         module_name, job_name = self._split_module_and_job(job_name)
-        job_module: ModuleType = self.get_job_module(module_name)
+        job_module: ModuleType = self.get_module(module_name)
         job: JobScope = getattr(job_module, job_name)
         return job
 
@@ -127,6 +136,14 @@ class Cli:
         if len(module_and_job) != 2:
             raise ValueError(f"Invalid job name: '{job_name}' (expecting <module_name>.<job_name>)")
         return module_and_job[0], module_and_job[1]
+
+    def get_hooks(self, module_name: str | None) -> JobHooks:  # pragma: no cover
+        hooks: JobHooks = JobHooksFactory.create()
+        if module_name:
+            hooks_module: ModuleType = self.get_module(module_name)
+            if getattr(hooks_module, "register_hooks"):
+                hooks_module.register_hooks(hooks)
+        return hooks
 
 
 def main() -> int:  # pragma: no cover

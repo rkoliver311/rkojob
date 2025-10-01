@@ -21,6 +21,7 @@ from rkojob import (
     JobException,
     JobFutures,
     JobGroupScope,
+    JobHooks,
     JobIdType,
     JobInterrupt,
     JobScope,
@@ -34,6 +35,7 @@ from rkojob import (
     ValueOrRef,
     Values,
     create_context_id,
+    get_scope_path,
     resolve_value,
 )
 from rkojob.delegates import Delegate
@@ -46,7 +48,7 @@ from rkojob.events import (
     JobStartScopeEvent,
     JobStatusImpl,
 )
-from rkojob.factories import JobFuturesFactory
+from rkojob.factories import JobFuturesFactory, JobHooksFactory
 from rkojob.values import NoValue, NoValueError, NoValueType
 
 
@@ -171,7 +173,7 @@ class JobContextState:
     State that is the same for all scopes in a context.
     """
 
-    def __init__(self, events: JobEventDispatcher | None, values: dict[str, Any] | None):
+    def __init__(self, events: JobEventDispatcher | None, values: dict[str, Any] | None, hooks: JobHooks | None):
         """
         :param events: The ``JobEventDispatcher`` that the context will use to
          generate and handle events. If ``None``, a new dispatcher will be used.
@@ -182,8 +184,11 @@ class JobContextState:
             events = JobDirectEventDispatcher()
         if values is None:
             values = {}
+        if hooks is None:
+            hooks = JobHooksFactory.create()
         self.events: JobEventDispatcher = events
         self.values: Values = Values(**values)
+        self.hooks: JobHooks = hooks
 
         self.scope_statuses: JobScopeStatuses = JobScopeStatuses()
         self.events.add_handler(self.scope_statuses)
@@ -211,6 +216,7 @@ class JobContextImpl(JobContext, JobEventHandler):
         *,
         values: dict[str, Any] | None = None,
         events: JobEventDispatcher | None = None,
+        hooks: JobHooks | None = None,
         state: JobContextState | None = None,
     ) -> None:
         """
@@ -222,7 +228,7 @@ class JobContextImpl(JobContext, JobEventHandler):
         """
         # State shared by all contexts (global)
         if state is None:
-            state = JobContextState(events=events, values=values)
+            state = JobContextState(events=events, values=values, hooks=hooks)
         self._shared_state: JobContextState = state
         # Respond to events from the events dispatcher.
         self._shared_state.events.add_handler(self)
@@ -325,6 +331,26 @@ class JobContextImpl(JobContext, JobEventHandler):
         if scope not in self._scope_stack:
             raise JobException(f"Scope {scope} is not an active scope.")
         return self._scope_stack[scope].teardown
+
+    def get_before_hooks(self) -> list[JobScope]:
+        # Hook spec uses a forward slash as a separator
+        scope_path: str = get_scope_path(*self.scopes, sep="/")
+        hooks: list[JobScope] = []
+        for h in self._shared_state.hooks.get_hooks(scope_path):
+            hook: JobScope | None = h.get_before(self)
+            if hook is not None:
+                hooks.append(hook)
+        return hooks
+
+    def get_after_hooks(self) -> list[JobScope]:
+        # Hook spec uses a forward slash as a separator
+        scope_path: str = get_scope_path(*self.scopes, sep="/")
+        hooks: list[JobScope] = []
+        for h in self._shared_state.hooks.get_hooks(scope_path):
+            hook: JobScope | None = h.get_after(self)
+            if hook is not None:
+                hooks.append(hook)
+        return hooks
 
     def get_futures(self, scope: JobScopeID) -> JobFutures:
         scope = self._resolve_scope(scope)
